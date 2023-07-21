@@ -2741,7 +2741,7 @@ class Trainer:
         elif self.is_deepspeed_enabled:
             # this takes care of everything as long as we aren't under zero3
             if self.args.should_save and not is_deepspeed_zero3_enabled():
-                if version.parse(accelerate_version) <= version.parse("0.20.3"):
+                if version.parse(accelerate_version) <= version.parse("0.20.2"):
                     raise ValueError("Install Accelerate from main branch")
                 state_dict = self.accelerator.get_state_dict(self.deepspeed)
 
