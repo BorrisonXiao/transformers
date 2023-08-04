@@ -2929,6 +2929,7 @@ else:
     _import_structure["trainer"] = ["Trainer"]
     _import_structure["trainer_pt_utils"] = ["torch_distributed_zero_first"]
     _import_structure["trainer_seq2seq"] = ["Seq2SeqTrainer"]
+    _import_structure["trainer_whisper"] = ["WhisperTrainer"]
 
 # TensorFlow-backed objects
 try:
@@ -6347,6 +6348,7 @@ if TYPE_CHECKING:
         from .trainer import Trainer
         from .trainer_pt_utils import torch_distributed_zero_first
         from .trainer_seq2seq import Seq2SeqTrainer
+        from .trainer_whisper import WhisperTrainer
 
     # TensorFlow
     try:
