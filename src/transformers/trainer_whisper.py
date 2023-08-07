@@ -67,7 +67,10 @@ class WhisperTrainer(Seq2SeqTrainer):
                 metrics = {}
                 for eval_dataset_name, eval_dataset in self.eval_dataset.items():
                     lang, mode = eval_dataset_name.split("_")
-                    model.generate = partial(model.generate, language=LANGS[lang], task="transcribe" if mode == "asr" else "translate")
+                    if "module" in model.__dict__ and type(model.module).__name__ == "PeftModel":
+                        model.module.base_model.generate = partial(model.module.base_model.generate, language=LANGS[lang], task="transcribe" if mode == "asr" else "translate")
+                    else:
+                        model.generate = partial(model.generate, language=LANGS[lang], task="transcribe" if mode == "asr" else "translate")
                     dataset_metrics = self.evaluate(
                         eval_dataset=eval_dataset,
                         ignore_keys=ignore_keys_for_eval,
