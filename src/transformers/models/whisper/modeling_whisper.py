@@ -937,6 +937,7 @@ class WhisperEncoder(WhisperPreTrainedModel):
                         hidden_states,
                         None,
                         (head_mask[idx] if head_mask is not None else None),
+                        use_reentrant=False,
                     )
                 else:
                     layer_outputs = encoder_layer(
@@ -1174,6 +1175,7 @@ class WhisperDecoder(WhisperPreTrainedModel):
                     head_mask[idx] if head_mask is not None else None,
                     cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None,
                     None,  # past_key_value
+                    use_reentrant=False,
                 )
             else:
                 layer_outputs = decoder_layer(
