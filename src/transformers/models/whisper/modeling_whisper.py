@@ -862,6 +862,7 @@ class WhisperEncoder(WhisperPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        use_reentrant=False,
     ):
         r"""
         Args:
@@ -937,7 +938,7 @@ class WhisperEncoder(WhisperPreTrainedModel):
                         hidden_states,
                         None,
                         (head_mask[idx] if head_mask is not None else None),
-                        use_reentrant=False,
+                        use_reentrant=use_reentrant,
                     )
                 else:
                     layer_outputs = encoder_layer(
@@ -1032,6 +1033,7 @@ class WhisperDecoder(WhisperPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        use_reentrant=False,
     ):
         r"""
         Args:
@@ -1175,7 +1177,7 @@ class WhisperDecoder(WhisperPreTrainedModel):
                     head_mask[idx] if head_mask is not None else None,
                     cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None,
                     None,  # past_key_value
-                    use_reentrant=False,
+                    use_reentrant=use_reentrant,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1234,6 +1236,8 @@ class WhisperModel(WhisperPreTrainedModel):
 
         self.encoder = WhisperEncoder(config)
         self.decoder = WhisperDecoder(config)
+        # QLoRA only works with use_reentrant=True, yet LoRA only works with use_reentrant=False
+        self.use_reentrant = False if not hasattr(config, "use_reentrant") else config.use_reentrant
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1353,6 +1357,7 @@ class WhisperModel(WhisperPreTrainedModel):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
+                use_reentrant=self.config.use_reentrant,
             )
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
@@ -1375,6 +1380,7 @@ class WhisperModel(WhisperPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            use_reentrant=self.config.use_reentrant,
         )
 
         if not return_dict:
