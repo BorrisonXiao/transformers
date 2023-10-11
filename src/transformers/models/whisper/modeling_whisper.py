@@ -1357,7 +1357,7 @@ class WhisperModel(WhisperPreTrainedModel):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
-                use_reentrant=self.config.use_reentrant,
+                use_reentrant=self.config.use_reentrant if hasattr(self.config, "use_reentrant") else False
             )
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
@@ -1380,7 +1380,7 @@ class WhisperModel(WhisperPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            use_reentrant=self.config.use_reentrant,
+            use_reentrant=self.config.use_reentrant if hasattr(self.config, "use_reentrant") else False
         )
 
         if not return_dict:

@@ -190,6 +190,7 @@ LANGUAGES = {
     "ba": "bashkir",
     "jw": "javanese",
     "su": "sundanese",
+    "tu": "tunisian", # Added for the iwslt Tunisian Arabic dataset
 }
 
 # language code lookup by name, with a few language aliases
@@ -389,11 +390,15 @@ class WhisperTokenizer(PreTrainedTokenizer):
 
     @property
     def prefix_tokens(self) -> List[int]:
+        # Keeps track of the difference of vocab size between the original vocab (51865)
+        # and the updated vocab size (if any) to adjust the special token ids accordingly
+        # Note that the new vocab_size should include the special tokens
+        diff = max(len(self.get_vocab()) - 51865, 0)
         all_special_ids = self.all_special_ids
-        bos_token_id = all_special_ids[-106]
-        translate_token_id = all_special_ids[-6]
-        transcribe_token_id = all_special_ids[-5]
-        notimestamps_token_id = all_special_ids[-1]
+        bos_token_id = all_special_ids[-106 - diff]
+        translate_token_id = all_special_ids[-6 - diff]
+        transcribe_token_id = all_special_ids[-5 - diff]
+        notimestamps_token_id = all_special_ids[-1 - diff]
         langs = tuple(LANGUAGES.keys())
 
         if self.language is not None:
@@ -415,7 +420,9 @@ class WhisperTokenizer(PreTrainedTokenizer):
 
         bos_sequence = [bos_token_id]
         if self.language is not None:
-            bos_sequence.append(bos_token_id + 1 + langs.index(language_id))
+            # To accomodate for the newly added languages
+            lang_token_id = self.get_vocab()[f'<|{language_id}|>']
+            bos_sequence.append(lang_token_id)
         if self.task is not None:
             bos_sequence.append(transcribe_token_id if self.task == "transcribe" else translate_token_id)
         if not self.predict_timestamps:
@@ -712,7 +719,7 @@ class WhisperTokenizer(PreTrainedTokenizer):
         # when we generate, so we slice the prefix tokens to: <|lang_id|> <|task|> <|notimestamps|>
         # to get the forced tokens
         forced_tokens = self.prefix_tokens[1:]
-        forced_decoder_ids = [(rank + 1, token) for rank, token in enumerate(forced_tokens)]
+        forced_decoder_ids = [(rank + 1, token) for rank, token in enumerate(forced_tokens)] 
         return forced_decoder_ids
 
     def _decode_asr(self, model_outputs, *, return_timestamps, return_language, time_precision):
