@@ -111,8 +111,6 @@ class WhisperTrainer(Seq2SeqTrainer):
                         task = "transcribe"
                         asr_forced_decoder_ids = self.tokenizer.get_decoder_prompt_ids(
                             language=src_lang, task=task)
-                        # print(model)
-                        # print(dir(model))
                         # Unify the torch datatype to match the model's datatype if model is an instance of DeepSpeedEngine
                         if hasattr(model, 'get_data_types'):
                             inputs['input_features'] = inputs['input_features'].to(
