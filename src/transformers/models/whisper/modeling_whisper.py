@@ -1467,6 +1467,7 @@ class WhisperForConditionalGeneration(WhisperPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        decoder_loss_mask: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple[torch.Tensor], Seq2SeqLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1528,6 +1529,10 @@ class WhisperForConditionalGeneration(WhisperPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             # move labels to correct device to enable PP
             labels = labels.to(lm_logits.device)
+            # Mask the labels with -100 (padding token) if decoder_loss_mask is enabled
+            if decoder_loss_mask is not None:
+                # _labels = labels # Original labels, for debugging purpose only
+                labels = torch.where(decoder_loss_mask, labels, torch.tensor(-100).type_as(labels))
             loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.reshape(-1))
 
         if not return_dict:
