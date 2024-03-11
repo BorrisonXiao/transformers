@@ -2348,7 +2348,10 @@ class GenerationMixin:
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
 
-            next_token_logits = outputs.logits[:, -1, :]
+            try:
+                next_token_logits = outputs.logits[:, -1, :]
+            except IndexError:
+                breakpoint()
 
             # pre-process distribution
             next_tokens_scores = logits_processor(input_ids, next_token_logits)
@@ -2399,7 +2402,7 @@ class GenerationMixin:
                     this_peer_finished = True
 
             # stop if we exceed the maximum length
-            if stopping_criteria(input_ids, scores):
+            if stopping_criteria(input_ids, scores) or input_ids.shape[-1] >= self.config.max_length - 1:
                 this_peer_finished = True
 
             if this_peer_finished and not synced_gpus:
