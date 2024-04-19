@@ -185,21 +185,6 @@ class WhisperTrainer(Seq2SeqTrainer):
                             asr_hyps = asr_hyps[:, :440 - max_tgt_len]
                             asr_hyp_texts = self.tokenizer.batch_decode(
                                 asr_hyps, skip_special_tokens=True)
-
-                            # TODO: Debugging, remove later
-                            # if torch.rand(1).item() < 0.1:
-                            #     debug_f = "/home/hltcoe/cxiao/scale23/st/ft_exp/hf_whisper_medium_merged/spa/train-cts_sp/bmtl/lora/logdir/samples.txt"
-                            #     with open(debug_f, "a") as fd:
-                            #         # For debugging purposes, the new labels are written to a file
-                            #         new_strs = asr_hyp_texts
-                            #         org_strs = self.tokenizer.tokenizer.batch_decode(
-                            #             inputs['labels_src'], fd)
-                            #         for org, new in zip(org_strs, new_strs):
-                            #             print("ORG:", file=fd)
-                            #             print(org.strip(), file=fd)
-                            #             print("NEW:", file=fd)
-                            #             print(new.strip(), file=fd)
-                            #         print("----------", file=fd)
             # If the max_sample_prob is 0.0, then the ASR hypotheses are not generated
             # and the ASR reference is used as the ST prompt
             inputs_st = {}

@@ -192,6 +192,10 @@ LANGUAGES = {
     "jw": "javanese",
     "su": "sundanese",
     "tu": "tunisian",  # Added for the iwslt Tunisian Arabic dataset
+    "bb": "bemba",  # Added for the iwslt Bemba dataset
+    "bh": "bhojpuri",  # Added for the iwslt Bhojpuri dataset
+    "qu": "quechua",  # Added for the iwslt Quechua dataset
+    "le": "levantine",  # Added for the iwslt Levantine dataset
 }
 
 # language code lookup by name, with a few language aliases
@@ -210,7 +214,7 @@ TO_LANGUAGE_CODE = {
     "castilian": "es",
 }
 
-TASK_IDS = ["translate", "transcribe", "bmtl"]
+TASK_IDS = ["translate", "transcribe"]
 
 
 class WhisperTokenizer(PreTrainedTokenizer):
@@ -406,7 +410,8 @@ class WhisperTokenizer(PreTrainedTokenizer):
         bos_token_id = all_special_ids[-106 - diff]
         translate_token_id = all_special_ids[-6 - diff]
         transcribe_token_id = all_special_ids[-5 - diff]
-        bmtl_token_id = self.get_vocab()['<|bmtl|>'] if '<|bmtl|>' in self.get_vocab() else None
+        bmtl_token_id = self.get_vocab(
+        )['<|bmtl|>'] if '<|bmtl|>' in self.get_vocab() else None
         notimestamps_token_id = all_special_ids[-1 - diff]
 
         if self.language is not None:
