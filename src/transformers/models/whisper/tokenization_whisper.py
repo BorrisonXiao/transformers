@@ -196,6 +196,7 @@ LANGUAGES = {
     "bh": "bhojpuri",  # Added for the iwslt Bhojpuri dataset
     "qu": "quechua",  # Added for the iwslt Quechua dataset
     "le": "levantine",  # Added for the iwslt Levantine dataset
+    "tq": "tamasheq",  # Added for the iwslt Tamasheq dataset
 }
 
 # language code lookup by name, with a few language aliases
