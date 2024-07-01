@@ -16,6 +16,15 @@ rendered properly in your Markdown viewer.
 
 # VAN
 
+<Tip warning={true}>
+
+This model is in maintenance mode only, we don't accept any new PRs changing its code.
+
+If you run into any issues running this model, please reinstall the last version that supported this model: v4.30.0.
+You can do so by running the following command: `pip install -U transformers==4.30.0`.
+
+</Tip>
+
 ## Overview
 
 The VAN model was proposed in [Visual Attention Network](https://arxiv.org/abs/2202.09741) by Meng-Hao Guo, Cheng-Ze Lu, Zheng-Ning Liu, Ming-Ming Cheng, Shi-Min Hu.
@@ -30,7 +39,7 @@ Tips:
 
 - VAN does not have an embedding layer, thus the `hidden_states` will have a length equal to the number of stages.
 
-The figure below illustrates the architecture of a Visual Aattention Layer. Taken from the [original paper](https://arxiv.org/abs/2202.09741).
+The figure below illustrates the architecture of a Visual Attention Layer. Taken from the [original paper](https://arxiv.org/abs/2202.09741).
 
 <img width="600" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/van_architecture.png"/>
 
@@ -51,12 +60,10 @@ If you're interested in submitting a resource to be included here, please feel f
 
 [[autodoc]] VanConfig
 
-
 ## VanModel
 
 [[autodoc]] VanModel
     - forward
-
 
 ## VanForImageClassification
 

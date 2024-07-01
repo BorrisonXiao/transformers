@@ -48,12 +48,12 @@ class TFBlenderbotSmallModelTester:
         use_labels=False,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
-        max_position_embeddings=20,
+        max_position_embeddings=50,
         eos_token_id=2,
         pad_token_id=1,
         bos_token_id=0,
@@ -185,7 +185,6 @@ class TFBlenderbotSmallModelTest(TFModelTesterMixin, PipelineTesterMixin, unitte
     all_generative_model_classes = (TFBlenderbotSmallForConditionalGeneration,) if is_tf_available() else ()
     pipeline_model_mapping = (
         {
-            "conversational": TFBlenderbotSmallForConditionalGeneration,
             "feature-extraction": TFBlenderbotSmallModel,
             "summarization": TFBlenderbotSmallForConditionalGeneration,
             "text2text-generation": TFBlenderbotSmallForConditionalGeneration,
@@ -197,6 +196,11 @@ class TFBlenderbotSmallModelTest(TFModelTesterMixin, PipelineTesterMixin, unitte
     is_encoder_decoder = True
     test_pruning = False
     test_onnx = False
+
+    def is_pipeline_test_to_skip(
+        self, pipeline_test_casse_name, config_class, model_architecture, tokenizer_name, processor_name
+    ):
+        return pipeline_test_casse_name == "TextGenerationPipelineTests"
 
     def setUp(self):
         self.model_tester = TFBlenderbotSmallModelTester(self)

@@ -32,7 +32,6 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers.models.xlnet.modeling_tf_xlnet import (
-        TF_XLNET_PRETRAINED_MODEL_ARCHIVE_LIST,
         TFXLNetForMultipleChoice,
         TFXLNetForQuestionAnsweringSimple,
         TFXLNetForSequenceClassification,
@@ -61,7 +60,7 @@ class TFXLNetModelTester:
         self.hidden_size = 32
         self.num_attention_heads = 4
         self.d_inner = 128
-        self.num_hidden_layers = 5
+        self.num_hidden_layers = 2
         self.type_sequence_label_size = 2
         self.untie_r = True
         self.bi_data = False
@@ -365,6 +364,12 @@ class TFXLNetModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCas
     test_head_masking = False
     test_onnx = False
 
+    # Note that `TFXLNetModelTest` is not a subclass of `GenerationTesterMixin`, so no contrastive generation tests
+    # from there is run against `TFXLNetModel`.
+    @unittest.skip("XLNet has special cache mechanism and is currently not working with contrastive generation")
+    def test_xla_generate_contrastive(self):
+        super().test_xla_generate_contrastive()
+
     # TODO: Fix the failed tests
     def is_pipeline_test_to_skip(
         self, pipeline_test_casse_name, config_class, model_architecture, tokenizer_name, processor_name
@@ -409,9 +414,9 @@ class TFXLNetModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCas
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_XLNET_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFXLNetModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "xlnet/xlnet-base-cased"
+        model = TFXLNetModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     @unittest.skip("Some of the XLNet models misbehave with flexible input shapes.")
     def test_compile_tf_model(self):
@@ -485,7 +490,7 @@ class TFXLNetModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCas
 class TFXLNetModelLanguageGenerationTest(unittest.TestCase):
     @slow
     def test_lm_generate_xlnet_base_cased(self):
-        model = TFXLNetLMHeadModel.from_pretrained("xlnet-base-cased")
+        model = TFXLNetLMHeadModel.from_pretrained("xlnet/xlnet-base-cased")
         # fmt: off
         input_ids = tf.convert_to_tensor(
             [

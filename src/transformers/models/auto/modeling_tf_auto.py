@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Auto Model class."""
-
+"""Auto Model class."""
 
 import warnings
 from collections import OrderedDict
@@ -39,6 +38,7 @@ TF_MODEL_MAPPING_NAMES = OrderedDict(
         ("clip", "TFCLIPModel"),
         ("convbert", "TFConvBertModel"),
         ("convnext", "TFConvNextModel"),
+        ("convnextv2", "TFConvNextV2Model"),
         ("ctrl", "TFCTRLModel"),
         ("cvt", "TFCvtModel"),
         ("data2vec-vision", "TFData2VecVisionModel"),
@@ -57,6 +57,7 @@ TF_MODEL_MAPPING_NAMES = OrderedDict(
         ("gptj", "TFGPTJModel"),
         ("groupvit", "TFGroupViTModel"),
         ("hubert", "TFHubertModel"),
+        ("idefics", "TFIdeficsModel"),
         ("layoutlm", "TFLayoutLMModel"),
         ("layoutlmv3", "TFLayoutLMv3Model"),
         ("led", "TFLEDModel"),
@@ -64,6 +65,7 @@ TF_MODEL_MAPPING_NAMES = OrderedDict(
         ("lxmert", "TFLxmertModel"),
         ("marian", "TFMarianModel"),
         ("mbart", "TFMBartModel"),
+        ("mistral", "TFMistralModel"),
         ("mobilebert", "TFMobileBertModel"),
         ("mobilevit", "TFMobileViTModel"),
         ("mpnet", "TFMPNetModel"),
@@ -80,6 +82,7 @@ TF_MODEL_MAPPING_NAMES = OrderedDict(
         ("sam", "TFSamModel"),
         ("segformer", "TFSegformerModel"),
         ("speech_to_text", "TFSpeech2TextModel"),
+        ("swiftformer", "TFSwiftFormerModel"),
         ("swin", "TFSwinModel"),
         ("t5", "TFT5Model"),
         ("tapas", "TFTapasModel"),
@@ -110,6 +113,7 @@ TF_MODEL_FOR_PRETRAINING_MAPPING_NAMES = OrderedDict(
         ("funnel", "TFFunnelForPreTraining"),
         ("gpt-sw3", "TFGPT2LMHeadModel"),
         ("gpt2", "TFGPT2LMHeadModel"),
+        ("idefics", "TFIdeficsForVisionText2Text"),
         ("layoutlm", "TFLayoutLMForMaskedLM"),
         ("lxmert", "TFLxmertForPreTraining"),
         ("mobilebert", "TFMobileBertForPreTraining"),
@@ -175,6 +179,7 @@ TF_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = OrderedDict(
         ("gpt-sw3", "TFGPT2LMHeadModel"),
         ("gpt2", "TFGPT2LMHeadModel"),
         ("gptj", "TFGPTJForCausalLM"),
+        ("mistral", "TFMistralForCausalLM"),
         ("openai-gpt", "TFOpenAIGPTLMHeadModel"),
         ("opt", "TFOPTForCausalLM"),
         ("rembert", "TFRemBertForCausalLM"),
@@ -200,6 +205,7 @@ TF_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING_NAMES = OrderedDict(
     [
         # Model for Image-classsification
         ("convnext", "TFConvNextForImageClassification"),
+        ("convnextv2", "TFConvNextV2ForImageClassification"),
         ("cvt", "TFCvtForImageClassification"),
         ("data2vec-vision", "TFData2VecVisionForImageClassification"),
         ("deit", ("TFDeiTForImageClassification", "TFDeiTForImageClassificationWithTeacher")),
@@ -211,6 +217,7 @@ TF_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING_NAMES = OrderedDict(
         ("regnet", "TFRegNetForImageClassification"),
         ("resnet", "TFResNetForImageClassification"),
         ("segformer", "TFSegformerForImageClassification"),
+        ("swiftformer", "TFSwiftFormerForImageClassification"),
         ("swin", "TFSwinForImageClassification"),
         ("vit", "TFViTForImageClassification"),
     ]
@@ -315,6 +322,7 @@ TF_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING_NAMES = OrderedDict(
         ("layoutlm", "TFLayoutLMForSequenceClassification"),
         ("layoutlmv3", "TFLayoutLMv3ForSequenceClassification"),
         ("longformer", "TFLongformerForSequenceClassification"),
+        ("mistral", "TFMistralForSequenceClassification"),
         ("mobilebert", "TFMobileBertForSequenceClassification"),
         ("mpnet", "TFMPNetForSequenceClassification"),
         ("openai-gpt", "TFOpenAIGPTForSequenceClassification"),
@@ -362,6 +370,7 @@ TF_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES = OrderedDict([("wav2vec2", "TFW
 TF_MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING_NAMES = OrderedDict(
     [
         ("layoutlm", "TFLayoutLMForQuestionAnswering"),
+        ("layoutlmv3", "TFLayoutLMv3ForQuestionAnswering"),
     ]
 )
 
@@ -409,6 +418,7 @@ TF_MODEL_FOR_MULTIPLE_CHOICE_MAPPING_NAMES = OrderedDict(
         ("bert", "TFBertForMultipleChoice"),
         ("camembert", "TFCamembertForMultipleChoice"),
         ("convbert", "TFConvBertForMultipleChoice"),
+        ("deberta-v2", "TFDebertaV2ForMultipleChoice"),
         ("distilbert", "TFDistilBertForMultipleChoice"),
         ("electra", "TFElectraForMultipleChoice"),
         ("flaubert", "TFFlaubertForMultipleChoice"),
@@ -593,7 +603,7 @@ class TFAutoModelForSemanticSegmentation(_BaseAutoModelClass):
     _model_mapping = TF_MODEL_FOR_SEMANTIC_SEGMENTATION_MAPPING
 
 
-TF_AutoModelForSemanticSegmentation = auto_class_update(
+TFAutoModelForSemanticSegmentation = auto_class_update(
     TFAutoModelForSemanticSegmentation, head_doc="semantic segmentation"
 )
 
@@ -617,7 +627,9 @@ class TFAutoModelForSeq2SeqLM(_BaseAutoModelClass):
 
 
 TFAutoModelForSeq2SeqLM = auto_class_update(
-    TFAutoModelForSeq2SeqLM, head_doc="sequence-to-sequence language modeling", checkpoint_for_example="t5-base"
+    TFAutoModelForSeq2SeqLM,
+    head_doc="sequence-to-sequence language modeling",
+    checkpoint_for_example="google-t5/t5-base",
 )
 
 

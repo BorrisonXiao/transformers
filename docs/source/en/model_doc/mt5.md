@@ -60,7 +60,7 @@ Google has released the following variants:
 This model was contributed by [patrickvonplaten](https://huggingface.co/patrickvonplaten). The original code can be
 found [here](https://github.com/google-research/multilingual-t5).
 
-## Documentation resources
+## Resources
 
 - [Translation task guide](../tasks/translation)
 - [Summarization task guide](../tasks/summarization)
@@ -82,6 +82,8 @@ See [`T5Tokenizer`] for all details.
 
 See [`T5TokenizerFast`] for all details.
 
+<frameworkcontent>
+<pt>
 
 ## MT5Model
 
@@ -95,6 +97,21 @@ See [`T5TokenizerFast`] for all details.
 
 [[autodoc]] MT5EncoderModel
 
+## MT5ForSequenceClassification
+
+[[autodoc]] MT5ForSequenceClassification
+
+## MT5ForTokenClassification
+
+[[autodoc]] MT5ForTokenClassification
+
+## MT5ForQuestionAnswering
+
+[[autodoc]] MT5ForQuestionAnswering
+
+</pt>
+<tf>
+
 ## TFMT5Model
 
 [[autodoc]] TFMT5Model
@@ -107,6 +124,9 @@ See [`T5TokenizerFast`] for all details.
 
 [[autodoc]] TFMT5EncoderModel
 
+</tf>
+<jax>
+
 ## FlaxMT5Model
 
 [[autodoc]] FlaxMT5Model
@@ -118,3 +138,6 @@ See [`T5TokenizerFast`] for all details.
 ## FlaxMT5EncoderModel
 
 [[autodoc]] FlaxMT5EncoderModel
+
+</jax>
+</frameworkcontent>

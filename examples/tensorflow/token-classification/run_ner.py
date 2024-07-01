@@ -75,12 +75,22 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    use_auth_token: bool = field(
+    token: str = field(
+        default=None,
+        metadata={
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
+        },
+    )
+    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -228,22 +238,24 @@ def main():
         raw_datasets = load_dataset(
             data_args.dataset_name,
             data_args.dataset_config_name,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
         )
     else:
         data_files = {}
         if data_args.train_file is not None:
             data_files["train"] = data_args.train_file
+            extension = data_args.train_file.split(".")[-1]
         if data_args.validation_file is not None:
             data_files["validation"] = data_args.validation_file
-        extension = data_args.train_file.split(".")[-1]
+            extension = data_args.validation_file.split(".")[-1]
         raw_datasets = load_dataset(
             extension,
             data_files=data_files,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
+    # https://huggingface.co/docs/datasets/loading_datasets.
 
     if raw_datasets["train"] is not None:
         column_names = raw_datasets["train"].column_names
@@ -291,9 +303,19 @@ def main():
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
     if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, num_labels=num_labels)
+        config = AutoConfig.from_pretrained(
+            model_args.config_name,
+            num_labels=num_labels,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
+        )
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, num_labels=num_labels)
+        config = AutoConfig.from_pretrained(
+            model_args.model_name_or_path,
+            num_labels=num_labels,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
+        )
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")
@@ -301,14 +323,25 @@ def main():
     tokenizer_name_or_path = model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path
     if not tokenizer_name_or_path:
         raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
+            "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
 
     if config.model_type in {"gpt2", "roberta"}:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True, add_prefix_space=True)
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name_or_path,
+            use_fast=True,
+            add_prefix_space=True,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
+        )
     else:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True)
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name_or_path,
+            use_fast=True,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
+        )
     # endregion
 
     # region Preprocessing the raw datasets
@@ -379,10 +412,14 @@ def main():
             model = TFAutoModelForTokenClassification.from_pretrained(
                 model_args.model_name_or_path,
                 config=config,
+                token=model_args.token,
+                trust_remote_code=model_args.trust_remote_code,
             )
         else:
             logger.info("Training new model from scratch")
-            model = TFAutoModelForTokenClassification.from_config(config)
+            model = TFAutoModelForTokenClassification.from_config(
+                config, token=model_args.token, trust_remote_code=model_args.trust_remote_code
+            )
 
         # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
         # on a small vocab and want a smaller embedding size, remove this test.
@@ -460,7 +497,7 @@ def main():
         # endregion
 
         # Metrics
-        metric = evaluate.load("seqeval")
+        metric = evaluate.load("seqeval", cache_dir=model_args.cache_dir)
 
         def get_labels(y_pred, y_true):
             # Transform predictions and references tensos to numpy arrays

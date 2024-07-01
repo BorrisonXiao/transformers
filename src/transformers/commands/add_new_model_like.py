@@ -23,6 +23,8 @@ from itertools import chain
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Pattern, Tuple, Union
 
+import yaml
+
 from ..models import auto as auto_module
 from ..models.auto.configuration_auto import model_type_to_module_name
 from ..utils import is_flax_available, is_tf_available, is_torch_available, logging
@@ -525,35 +527,6 @@ def duplicate_module(
     # Loop and treat all objects
     new_objects = []
     for obj in objects:
-        # Special cases
-        if "PRETRAINED_CONFIG_ARCHIVE_MAP = {" in obj:
-            # docstyle-ignore
-            obj = (
-                f"{new_model_patterns.model_upper_cased}_PRETRAINED_CONFIG_ARCHIVE_MAP = "
-                + "{"
-                + f"""
-    "{new_model_patterns.checkpoint}": "https://huggingface.co/{new_model_patterns.checkpoint}/resolve/main/config.json",
-"""
-                + "}\n"
-            )
-            new_objects.append(obj)
-            continue
-        elif "PRETRAINED_MODEL_ARCHIVE_LIST = [" in obj:
-            if obj.startswith("TF_"):
-                prefix = "TF_"
-            elif obj.startswith("FLAX_"):
-                prefix = "FLAX_"
-            else:
-                prefix = ""
-            # docstyle-ignore
-            obj = f"""{prefix}{new_model_patterns.model_upper_cased}_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "{new_model_patterns.checkpoint}",
-    # See all {new_model_patterns.model_name} models at https://huggingface.co/models?filter={new_model_patterns.model_type}
-]
-"""
-            new_objects.append(obj)
-            continue
-
         special_pattern = False
         for pattern, attr in SPECIAL_PATTERNS.items():
             if pattern in obj:
@@ -783,7 +756,6 @@ def retrieve_info_for_model(model_type, frameworks: Optional[List[str]] = None):
 
     model_name = auto_module.MODEL_NAMES_MAPPING[model_type]
     config_class = auto_module.configuration_auto.CONFIG_MAPPING_NAMES[model_type]
-    archive_map = auto_module.configuration_auto.CONFIG_ARCHIVE_MAP_MAPPING_NAMES.get(model_type, None)
     if model_type in auto_module.tokenization_auto.TOKENIZER_MAPPING_NAMES:
         tokenizer_classes = auto_module.tokenization_auto.TOKENIZER_MAPPING_NAMES[model_type]
         tokenizer_class = tokenizer_classes[0] if tokenizer_classes[0] is not None else tokenizer_classes[1]
@@ -812,19 +784,7 @@ def retrieve_info_for_model(model_type, frameworks: Optional[List[str]] = None):
 
     model_classes = retrieve_model_classes(model_type, frameworks=frameworks)
 
-    # Retrieve model upper-cased name from the constant name of the pretrained archive map.
-    if archive_map is None:
-        model_upper_cased = model_camel_cased.upper()
-    else:
-        parts = archive_map.split("_")
-        idx = 0
-        while idx < len(parts) and parts[idx] != "PRETRAINED":
-            idx += 1
-        if idx < len(parts):
-            model_upper_cased = "_".join(parts[:idx])
-        else:
-            model_upper_cased = model_camel_cased.upper()
-
+    model_upper_cased = model_camel_cased.upper()
     model_patterns = ModelPatterns(
         model_name,
         checkpoint=find_base_model_checkpoint(model_type, model_files=model_files),
@@ -1133,14 +1093,6 @@ def add_model_to_auto_classes(
             for attr in ["model_type", "model_name"]:
                 old_model_line = old_model_line.replace("{" + attr + "}", getattr(old_model_patterns, attr))
                 new_model_line = new_model_line.replace("{" + attr + "}", getattr(new_model_patterns, attr))
-            if "pretrained_archive_map" in pattern:
-                old_model_line = old_model_line.replace(
-                    "{pretrained_archive_map}", f"{old_model_patterns.model_upper_cased}_PRETRAINED_CONFIG_ARCHIVE_MAP"
-                )
-                new_model_line = new_model_line.replace(
-                    "{pretrained_archive_map}", f"{new_model_patterns.model_upper_cased}_PRETRAINED_CONFIG_ARCHIVE_MAP"
-                )
-
             new_model_line = new_model_line.replace(
                 old_model_patterns.model_camel_cased, new_model_patterns.model_camel_cased
             )
@@ -1266,6 +1218,56 @@ def duplicate_doc_file(
 
     with open(dest_file, "w", encoding="utf-8") as f:
         f.write("\n".join(new_blocks))
+
+
+def insert_model_in_doc_toc(old_model_patterns, new_model_patterns):
+    """
+    Insert the new model in the doc TOC, in the same section as the old model.
+
+    Args:
+        old_model_patterns (`ModelPatterns`): The patterns for the old model.
+        new_model_patterns (`ModelPatterns`): The patterns for the new model.
+    """
+    toc_file = REPO_PATH / "docs" / "source" / "en" / "_toctree.yml"
+    with open(toc_file, "r", encoding="utf8") as f:
+        content = yaml.safe_load(f)
+
+    # Get to the model API doc
+    api_idx = 0
+    while content[api_idx]["title"] != "API":
+        api_idx += 1
+    api_doc = content[api_idx]["sections"]
+
+    model_idx = 0
+    while api_doc[model_idx]["title"] != "Models":
+        model_idx += 1
+    model_doc = api_doc[model_idx]["sections"]
+
+    # Find the base model in the Toc
+    old_model_type = old_model_patterns.model_type
+    section_idx = 0
+    while section_idx < len(model_doc):
+        sections = [entry["local"] for entry in model_doc[section_idx]["sections"]]
+        if f"model_doc/{old_model_type}" in sections:
+            break
+
+        section_idx += 1
+
+    if section_idx == len(model_doc):
+        old_model = old_model_patterns.model_name
+        new_model = new_model_patterns.model_name
+        print(f"Did not find {old_model} in the table of content, so you will need to add {new_model} manually.")
+        return
+
+    # Add the new model in the same toc
+    toc_entry = {"local": f"model_doc/{new_model_patterns.model_type}", "title": new_model_patterns.model_name}
+    model_doc[section_idx]["sections"].append(toc_entry)
+    model_doc[section_idx]["sections"] = sorted(model_doc[section_idx]["sections"], key=lambda s: s["title"].lower())
+    api_doc[model_idx]["sections"] = model_doc
+    content[api_idx]["sections"] = api_doc
+
+    with open(toc_file, "w", encoding="utf-8") as f:
+        f.write(yaml.dump(content, allow_unicode=True))
 
 
 def create_new_model_like(
@@ -1407,6 +1409,7 @@ def create_new_model_like(
     # 5. Add doc file
     doc_file = REPO_PATH / "docs" / "source" / "en" / "model_doc" / f"{old_model_patterns.model_type}.md"
     duplicate_doc_file(doc_file, old_model_patterns, new_model_patterns, frameworks=frameworks)
+    insert_model_in_doc_toc(old_model_patterns, new_model_patterns)
 
     # 6. Warn the user for duplicate patterns
     if old_model_patterns.model_type == old_model_patterns.checkpoint:
@@ -1621,7 +1624,7 @@ def get_user_input():
         "What will be the name of the config class for this model? ", default_value=f"{model_camel_cased}Config"
     )
     checkpoint = get_user_field(
-        "Please give a checkpoint identifier (on the model Hub) for this new model (e.g. facebook/roberta-base): "
+        "Please give a checkpoint identifier (on the model Hub) for this new model (e.g. facebook/FacebookAI/roberta-base): "
     )
 
     old_processing_classes = [

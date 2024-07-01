@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch RegNet model."""
+"""PyTorch RegNet model."""
 
 from typing import Optional
 
@@ -45,11 +45,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 1088, 7, 7]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "facebook/regnet-y-040"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
-
-REGNET_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/regnet-y-040",
-    # See all regnet models at https://huggingface.co/models?filter=regnet
-]
 
 
 class RegNetConvLayer(nn.Module):
@@ -283,7 +278,7 @@ class RegNetPreTrainedModel(PreTrainedModel):
     config_class = RegNetConfig
     base_model_prefix = "regnet"
     main_input_name = "pixel_values"
-    supports_gradient_checkpointing = True
+    _no_split_modules = ["RegNetYLayer"]
 
     # Copied from transformers.models.resnet.modeling_resnet.ResNetPreTrainedModel._init_weights
     def _init_weights(self, module):
@@ -293,14 +288,10 @@ class RegNetPreTrainedModel(PreTrainedModel):
             nn.init.constant_(module.weight, 1)
             nn.init.constant_(module.bias, 0)
 
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, RegNetModel):
-            module.gradient_checkpointing = value
-
 
 REGNET_START_DOCSTRING = r"""
     This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass. Use it
-    as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage and
+    as a regular PyTorch Module and refer to the PyTorch documentation for all matters related to general usage and
     behavior.
 
     Parameters:

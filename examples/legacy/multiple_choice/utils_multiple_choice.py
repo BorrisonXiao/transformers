@@ -13,8 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Multiple choice fine-tuning: utilities to work with multiple choice tasks of reading comprehension """
-
+"""Multiple choice fine-tuning: utilities to work with multiple choice tasks of reading comprehension"""
 
 import csv
 import glob
@@ -379,7 +378,7 @@ class SwagProcessor(DataProcessor):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
         raise ValueError(
-            "For swag testing, the input file does not contain a label column. It can not be tested in current code"
+            "For swag testing, the input file does not contain a label column. It can not be tested in current code "
             "setting!"
         )
         return self._create_examples(self._read_csv(os.path.join(data_dir, "test.csv")), "test")
@@ -541,7 +540,7 @@ def convert_examples_to_features(
             if "num_truncated_tokens" in inputs and inputs["num_truncated_tokens"] > 0:
                 logger.info(
                     "Attention! you are cropping tokens (swag task is ok). "
-                    "If you are training ARC and RACE and you are poping question + options,"
+                    "If you are training ARC and RACE and you are poping question + options, "
                     "you need to try to use a bigger max seq length!"
                 )
 

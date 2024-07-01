@@ -16,6 +16,7 @@
 Training the distilled model.
 Supported architectures include: BERT -> DistilBERT, RoBERTa -> DistilRoBERTa, GPT2 -> DistilGPT2.
 """
+
 import argparse
 import json
 import os
@@ -208,7 +209,7 @@ def main():
         type=str,
         default="O1",
         help=(
-            "For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+            "For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']. "
             "See details at https://nvidia.github.io/apex/amp.html"
         ),
     )

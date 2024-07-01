@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TF 2.0 Swin model. """
-
+"""Testing suite for the TF 2.0 Swin model."""
 
 from __future__ import annotations
 
@@ -34,8 +33,8 @@ from ...test_pipeline_mixin import PipelineTesterMixin
 if is_tf_available():
     import tensorflow as tf
 
+    from transformers.modeling_tf_utils import keras
     from transformers.models.swin.modeling_tf_swin import (
-        TF_SWIN_PRETRAINED_MODEL_ARCHIVE_LIST,
         TFSwinForImageClassification,
         TFSwinForMaskedImageModeling,
         TFSwinModel,
@@ -45,7 +44,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoFeatureExtractor
+    from transformers import AutoImageProcessor
 
 
 class TFSwinModelTester:
@@ -237,9 +236,9 @@ class TFSwinModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase
 
         for model_class in self.all_model_classes:
             model = model_class(config)
-            self.assertIsInstance(model.get_input_embeddings(), tf.keras.layers.Layer)
+            self.assertIsInstance(model.get_input_embeddings(), keras.layers.Layer)
             x = model.get_output_embeddings()
-            self.assertTrue(x is None or isinstance(x, tf.keras.layers.Dense))
+            self.assertTrue(x is None or isinstance(x, keras.layers.Dense))
 
     def test_forward_signature(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
@@ -373,18 +372,18 @@ class TFSwinModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_SWIN_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFSwinModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "microsoft/swin-tiny-patch4-window7-224"
+        model = TFSwinModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @require_vision
 @require_tf
 class TFSwinModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
+    def default_image_processor(self):
         return (
-            AutoFeatureExtractor.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
+            AutoImageProcessor.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
             if is_vision_available()
             else None
         )
@@ -392,10 +391,10 @@ class TFSwinModelIntegrationTest(unittest.TestCase):
     @slow
     def test_inference_image_classification_head(self):
         model = TFSwinForImageClassification.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
 
         image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
-        inputs = feature_extractor(images=image, return_tensors="tf")
+        inputs = image_processor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(inputs)

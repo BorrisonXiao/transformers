@@ -43,7 +43,7 @@ If you want to use a specific model from the [hub](https://huggingface.co) you c
 the hub already defines it:
 
 ```python
->>> pipe = pipeline(model="roberta-large-mnli")
+>>> pipe = pipeline(model="FacebookAI/roberta-large-mnli")
 >>> pipe("This restaurant is awesome")
 [{'label': 'NEUTRAL', 'score': 0.7313136458396912}]
 ```
@@ -225,7 +225,7 @@ For users, a rule of thumb is:
 
 - **Measure performance on your load, with your hardware. Measure, measure, and keep measuring. Real numbers are the
   only way to go.**
-- If you are latency constrained (live product doing inference), don't batch
+- If you are latency constrained (live product doing inference), don't batch.
 - If you are using CPU, don't batch.
 - If you are using throughput (you want to run your model on a bunch of static data), on GPU, then:
 
@@ -318,6 +318,13 @@ Pipelines available for audio tasks include the following.
     - __call__
     - all
 
+### TextToAudioPipeline
+
+[[autodoc]] TextToAudioPipeline
+    - __call__
+    - all
+
+
 ### ZeroShotAudioClassificationPipeline
 
 [[autodoc]] ZeroShotAudioClassificationPipeline
@@ -342,6 +349,12 @@ Pipelines available for computer vision tasks include the following.
 ### ImageSegmentationPipeline
 
 [[autodoc]] ImageSegmentationPipeline
+    - __call__
+    - all
+
+### ImageToImagePipeline
+
+[[autodoc]] ImageToImagePipeline
     - __call__
     - all
 
@@ -373,25 +386,11 @@ Pipelines available for computer vision tasks include the following.
 
 Pipelines available for natural language processing tasks include the following.
 
-### ConversationalPipeline
-
-[[autodoc]] Conversation
-
-[[autodoc]] ConversationalPipeline
-    - __call__
-    - all
-
 ### FillMaskPipeline
 
 [[autodoc]] FillMaskPipeline
     - __call__
     - all
-
-### NerPipeline
-
-[[autodoc]] NerPipeline
-
-See [`TokenClassificationPipeline`] for all details.
 
 ### QuestionAnsweringPipeline
 
@@ -462,9 +461,21 @@ Pipelines available for multimodal tasks include the following.
     - __call__
     - all
 
+### ImageFeatureExtractionPipeline
+
+[[autodoc]] ImageFeatureExtractionPipeline
+    - __call__
+    - all
+
 ### ImageToTextPipeline
 
 [[autodoc]] ImageToTextPipeline
+    - __call__
+    - all
+
+### MaskGenerationPipeline
+
+[[autodoc]] MaskGenerationPipeline
     - __call__
     - all
 

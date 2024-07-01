@@ -31,6 +31,7 @@ from ...utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
+    is_bitsandbytes_available,
     is_ninja_available,
     is_torch_cuda_available,
     logging,
@@ -42,20 +43,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "RWKV/rwkv-4-169m-pile"
 _CONFIG_FOR_DOC = "RwkvConfig"
-
-RWKV_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "RWKV/rwkv-4-169m-pile",
-    "RWKV/rwkv-4-430m-pile",
-    "RWKV/rwkv-4-1b5-pile",
-    "RWKV/rwkv-4-3b-pile",
-    "RWKV/rwkv-4-7b-pile",
-    "RWKV/rwkv-4-14b-pile",
-    "RWKV/rwkv-raven-1b5",
-    "RWKV/rwkv-raven-3b",
-    "RWKV/rwkv-raven-7b",
-    "RWKV/rwkv-raven-14b",
-    # See all RWKV models at https://huggingface.co/models?filter=rwkv
-]
 
 
 rwkv_cuda_kernel = None
@@ -406,6 +393,8 @@ class RwkvPreTrainedModel(PreTrainedModel):
     base_model_prefix = "rwkv"
     _no_split_modules = ["RwkvBlock"]
     _keep_in_fp32_modules = ["time_decay", "time_first"]
+    supports_gradient_checkpointing = True
+    _is_stateful = True
 
     def _init_weights(self, module):
         """Initialize the weights."""
@@ -464,10 +453,6 @@ class RwkvPreTrainedModel(PreTrainedModel):
                 module.time_mix_key.data = torch.pow(time_weight, ratio_1_to_almost0)
                 module.time_mix_receptance.data = torch.pow(time_weight, ratio_1_to_almost0)
 
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, RwkvModel):
-            module.gradient_checkpointing = value
-
 
 @dataclass
 class RwkvOutput(ModelOutput):
@@ -495,8 +480,8 @@ class RwkvOutput(ModelOutput):
 
     last_hidden_state: torch.FloatTensor = None
     state: Optional[List[torch.FloatTensor]] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
@@ -528,8 +513,8 @@ class RwkvCausalLMOutput(ModelOutput):
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
     state: Optional[List[torch.FloatTensor]] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 RWKV_START_DOCSTRING = r"""
@@ -605,6 +590,8 @@ class RwkvModel(RwkvPreTrainedModel):
 
         self.layers_are_rescaled = False
 
+        self.gradient_checkpointing = False
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -638,6 +625,9 @@ class RwkvModel(RwkvPreTrainedModel):
         use_cache = use_cache if use_cache is not None else (self.config.use_cache if not self.training else False)
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        if attention_mask is None:
+            logger.warning_once("`attention_mask` was passed, but it is unused in this model.")
+
         if self.training == self.layers_are_rescaled:
             self._rescale_layers()
 
@@ -659,14 +649,27 @@ class RwkvModel(RwkvPreTrainedModel):
             ]
             state[4] -= 1e30
 
+        if self.gradient_checkpointing and self.training:
+            if use_cache:
+                logger.warning_once(
+                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
+                )
+                use_cache = False
+
         hidden_states = inputs_embeds
 
         all_self_attentions = () if output_attentions else None
         all_hidden_states = () if output_hidden_states else None
         for idx, block in enumerate(self.blocks):
-            hidden_states, state, attentions = block(
-                hidden_states, state=state, use_cache=use_cache, output_attentions=output_attentions
-            )
+            if self.gradient_checkpointing and self.training:
+                hidden_states, state, attentions = self._gradient_checkpointing_func(
+                    block.__call__, hidden_states, state, use_cache, output_attentions
+                )
+            else:
+                hidden_states, state, attentions = block(
+                    hidden_states, state=state, use_cache=use_cache, output_attentions=output_attentions
+                )
+
             if (
                 self.layers_are_rescaled
                 and self.config.rescale_every > 0
@@ -711,17 +714,34 @@ class RwkvModel(RwkvPreTrainedModel):
                             block.attention.output.weight.SCB.div_(2 ** int(block_id // self.config.rescale_every))
                             block.feed_forward.value.weight.SCB.div_(2 ** int(block_id // self.config.rescale_every))
                         elif hasattr(block.attention.output.weight, "quant_state"):
-                            block.attention.output.weight.quant_state[0].div_(
-                                2 ** int(block_id // self.config.rescale_every)
-                            )
-                            block.feed_forward.value.weight.quant_state[0].div_(
-                                2 ** int(block_id // self.config.rescale_every)
-                            )
+                            self._bnb_4bit_dequantize_and_rescale(block.attention.output, block_id)
+                            self._bnb_4bit_dequantize_and_rescale(block.feed_forward.value, block_id)
                         else:
                             block.attention.output.weight.div_(2 ** int(block_id // self.config.rescale_every))
                             block.feed_forward.value.weight.div_(2 ** int(block_id // self.config.rescale_every))
 
         self.layers_are_rescaled = not self.training
+
+    def _bnb_4bit_dequantize_and_rescale(self, target_layer, block_id):
+        r"""
+        Perform the dequantization and rescaling of the weights of a given layer. After that operation the layer will
+        be quantized again.
+        """
+        if not is_bitsandbytes_available():
+            raise ImportError("Please install bitsandbytes to use this method.")
+        import bitsandbytes as bnb
+
+        dequant_weights = bnb.functional.dequantize_4bit(target_layer.weight.data, target_layer.weight.quant_state)
+
+        dequant_weights.div_(2 ** int(block_id // self.config.rescale_every))
+
+        # re-quantize the model:
+        # we need to put it first on CPU then back to the device
+        # this will create an overhead :/
+        # We set requires_grad=False as we cannot compute gradients on top of 4bit parameters anyway and to avoid
+        # bugs with bnb
+        quant_weight = bnb.nn.Params4bit(dequant_weights.to("cpu"), requires_grad=False).to(dequant_weights.device)
+        setattr(target_layer, "weight", quant_weight)
 
 
 @add_start_docstrings(

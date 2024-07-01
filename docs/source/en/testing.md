@@ -57,8 +57,6 @@ RUN_SLOW=1 pytest examples/
 
 
 
-
-
 ### Choosing which tests to run
 
 This document goes into many details of how tests can be run. If after reading everything, you need even more details
@@ -112,7 +110,7 @@ pytest tests/test_optimization.py --collect-only -q
 To run an individual test module:
 
 ```bash
-pytest tests/test_logging.py
+pytest tests/utils/test_logging.py
 ```
 
 ### Run specific tests
@@ -170,7 +168,7 @@ pytest -k "ada and not adam" tests/test_optimization.py
 For example to run both `test_adafactor` and `test_adam_w` you can use:
 
 ```bash
-pytest -k "test_adam_w or test_adam_w" tests/test_optimization.py
+pytest -k "test_adafactor or test_adam_w" tests/test_optimization.py
 ```
 
 Note that we use `or` here, since we want either of the keywords to match to include both.
@@ -184,17 +182,18 @@ pytest -k "test and ada" tests/test_optimization.py
 ### Run `accelerate` tests
 
 Sometimes you need to run `accelerate` tests on your models. For that you can just add `-m accelerate_tests` to your command, if let's say you want to run these tests on `OPT` run:
+
 ```bash
-RUN_SLOW=1 pytest -m accelerate_tests tests/models/opt/test_modeling_opt.py 
+RUN_SLOW=1 pytest -m accelerate_tests tests/models/opt/test_modeling_opt.py
 ```
 
 
-### Run documentation tests 
+### Run documentation tests
 
-In order to test whether the documentation examples are correct, you should check that the `doctests` are passing. 
-As an example, let's use [`WhisperModel.forward`'s docstring](https://github.com/huggingface/transformers/blob/main/src/transformers/models/whisper/modeling_whisper.py#L1017-L1035): 
+In order to test whether the documentation examples are correct, you should check that the `doctests` are passing.
+As an example, let's use [`WhisperModel.forward`'s docstring](https://github.com/huggingface/transformers/blob/main/src/transformers/models/whisper/modeling_whisper.py#L1017-L1035):
 
-```python 
+```python
 r"""
 Returns:
 
@@ -217,8 +216,8 @@ Example:
 
 ```
 
-Just run the following line to automatically test every docstring example in the desired file: 
-```bash 
+Just run the following line to automatically test every docstring example in the desired file:
+```bash
 pytest --doctest-modules <path_to_file_or_dir>
 ```
 If the file has a markdown extention, you should add the `--doctest-glob="*.md"` argument.
@@ -432,14 +431,14 @@ pytest --instafail
 On a GPU-enabled setup, to test in CPU-only mode add `CUDA_VISIBLE_DEVICES=""`:
 
 ```bash
-CUDA_VISIBLE_DEVICES="" pytest tests/test_logging.py
+CUDA_VISIBLE_DEVICES="" pytest tests/utils/test_logging.py
 ```
 
 or if you have multiple gpus, you can specify which one is to be used by `pytest`. For example, to use only the
 second gpu if you have gpus `0` and `1`, you can run:
 
 ```bash
-CUDA_VISIBLE_DEVICES="1" pytest tests/test_logging.py
+CUDA_VISIBLE_DEVICES="1" pytest tests/utils/test_logging.py
 ```
 
 This is handy when you want to run different tasks on different GPUs.
@@ -452,13 +451,13 @@ decorators are used to set the requirements of tests CPU/GPU/TPU-wise:
 - `require_torch_multi_gpu` - as `require_torch` plus requires at least 2 GPUs
 - `require_torch_non_multi_gpu` - as `require_torch` plus requires 0 or 1 GPUs
 - `require_torch_up_to_2_gpus` - as `require_torch` plus requires 0 or 1 or 2 GPUs
-- `require_torch_tpu` - as `require_torch` plus requires at least 1 TPU
+- `require_torch_xla` - as `require_torch` plus requires at least 1 TPU
 
 Let's depict the GPU requirements in the following table:
 
 
 | n gpus | decorator                      |
-|--------+--------------------------------|
+|--------|--------------------------------|
 | `>= 0` | `@require_torch`               |
 | `>= 1` | `@require_torch_gpu`           |
 | `>= 2` | `@require_torch_multi_gpu`     |
@@ -511,6 +510,41 @@ from transformers.testing_utils import get_gpu_count
 n_gpu = get_gpu_count()  # works with torch and tf
 ```
 
+### Testing with a specific PyTorch backend or device
+
+To run the test suite on a specific torch device add `TRANSFORMERS_TEST_DEVICE="$device"` where `$device` is the target backend. For example, to test on CPU only:
+
+```bash
+TRANSFORMERS_TEST_DEVICE="cpu" pytest tests/utils/test_logging.py
+```
+
+This variable is useful for testing custom or less common PyTorch backends such as `mps`, `xpu` or `npu`. It can also be used to achieve the same effect as `CUDA_VISIBLE_DEVICES` by targeting specific GPUs or testing in CPU-only mode.
+
+Certain devices will require an additional import after importing `torch` for the first time. This can be specified using the environment variable `TRANSFORMERS_TEST_BACKEND`:
+
+```bash
+TRANSFORMERS_TEST_BACKEND="torch_npu" pytest tests/utils/test_logging.py
+```
+Alternative backends may also require the replacement of device-specific functions. For example `torch.cuda.manual_seed` may need to be replaced with a device-specific seed setter like `torch.npu.manual_seed` or `torch.xpu.manual_seed` to correctly set a random seed on the device. To specify a new backend with backend-specific device functions when running the test suite, create a Python device specification file `spec.py` in the format:
+
+```python
+import torch
+import torch_npu # for xpu, replace it with `import intel_extension_for_pytorch`
+# !! Further additional imports can be added here !!
+
+# Specify the device name (eg. 'cuda', 'cpu', 'npu', 'xpu', 'mps')
+DEVICE_NAME = 'npu'
+
+# Specify device-specific backends to dispatch to.
+# If not specified, will fallback to 'default' in 'testing_utils.py`
+MANUAL_SEED_FN = torch.npu.manual_seed
+EMPTY_CACHE_FN = torch.npu.empty_cache
+DEVICE_COUNT_FN = torch.npu.device_count
+```
+This format also allows for specification of any additional imports required. To use this file to replace equivalent methods in the test suite, set the environment variable `TRANSFORMERS_TEST_DEVICE_SPEC` to the path of the spec file, e.g. `TRANSFORMERS_TEST_DEVICE_SPEC=spec.py`.
+
+Currently, only `MANUAL_SEED_FN`, `EMPTY_CACHE_FN` and `DEVICE_COUNT_FN` are supported for device-specific dispatch.
+
 ### Distributed training
 
 `pytest` can't deal with distributed training directly. If this is attempted - the sub-processes don't do the right
@@ -538,13 +572,13 @@ according captured output will usually be shown along with the failure traceback
 To disable output capturing and to get the `stdout` and `stderr` normally, use `-s` or `--capture=no`:
 
 ```bash
-pytest -s tests/test_logging.py
+pytest -s tests/utils/test_logging.py
 ```
 
 To send test results to JUnit format output:
 
 ```bash
-py.test tests --junitxml=result.xml
+pytest tests --junitxml=result.xml
 ```
 
 ### Color control
@@ -552,7 +586,7 @@ py.test tests --junitxml=result.xml
 To have no color (e.g., yellow on white background is not readable):
 
 ```bash
-pytest --color=no tests/test_logging.py
+pytest --color=no tests/utils/test_logging.py
 ```
 
 ### Sending test report to online pastebin service
@@ -560,7 +594,7 @@ pytest --color=no tests/test_logging.py
 Creating a URL for each test failure:
 
 ```bash
-pytest --pastebin=failed tests/test_logging.py
+pytest --pastebin=failed tests/utils/test_logging.py
 ```
 
 This will submit test run information to a remote Paste service and provide a URL for each failure. You may select
@@ -569,7 +603,7 @@ tests as usual or add for example -x if you only want to send one particular fai
 Creating a URL for a whole test session log:
 
 ```bash
-pytest --pastebin=all tests/test_logging.py
+pytest --pastebin=all tests/utils/test_logging.py
 ```
 
 ## Writing tests
@@ -847,7 +881,7 @@ code that's buggy causes some bad state that will affect other tests, do not use
 - Here is how to skip whole test unconditionally:
 
 ```python no-style
-@unittest.skip("this bug needs to be fixed")
+@unittest.skip(reason="this bug needs to be fixed")
 def test_feature_x():
 ```
 
@@ -864,7 +898,8 @@ or the `xfail` way:
 def test_feature_x():
 ```
 
-- Here is how to skip a test based on some internal check inside the test:
+
+Here's how to skip a test based on internal checks within the test:
 
 ```python
 def test_feature_x():
@@ -940,7 +975,7 @@ Some decorators like `@parameterized` rewrite test names, therefore `@slow` and 
 `@require_*` have to be listed last for them to work correctly. Here is an example of the correct usage:
 
 ```python no-style
-@parameteriz ed.expand(...)
+@parameterized.expand(...)
 @slow
 def test_integration_foo():
 ```
@@ -1199,7 +1234,7 @@ tf.random.set_seed(seed)
 To start a debugger at the point of the warning, do this:
 
 ```bash
-pytest tests/test_logging.py -W error::UserWarning --pdb
+pytest tests/utils/test_logging.py -W error::UserWarning --pdb
 ```
 
 ## Working with github actions workflows
@@ -1276,3 +1311,19 @@ You can vote for this feature and see where it is at these CI-specific threads:
 
 - [Github Actions:](https://github.com/actions/toolkit/issues/399)
 - [CircleCI:](https://ideas.circleci.com/ideas/CCI-I-344)
+
+## DeepSpeed integration
+
+For a PR that involves the DeepSpeed integration, keep in mind our CircleCI PR CI setup doesn't have GPUs. Tests requiring GPUs are run on a different CI nightly. This means if you get a passing CI report in your PR, it doesn’t mean the DeepSpeed tests pass.
+
+To run DeepSpeed tests:
+
+```bash
+RUN_SLOW=1 pytest tests/deepspeed/test_deepspeed.py
+```
+
+Any changes to the modeling or PyTorch examples code requires running the model zoo tests as well.
+
+```bash
+RUN_SLOW=1 pytest tests/deepspeed
+```

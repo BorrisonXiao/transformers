@@ -32,10 +32,25 @@ transformers = direct_transformers_import(PATH_TO_TRANSFORMERS)
 CONFIG_MAPPING = transformers.models.auto.configuration_auto.CONFIG_MAPPING
 
 SPECIAL_CASES_TO_ALLOW = {
+    # 'max_position_embeddings' is not used in modeling file, but needed for eval frameworks like Huggingface's lighteval (https://github.com/huggingface/lighteval/blob/af24080ea4f16eaf1683e353042a2dfc9099f038/src/lighteval/models/base_model.py#L264).
+    # periods and offsers are not used in modeling file, but used in the configuration file to define `layers_block_type` and `layers_num_experts`.
+    "JambaConfig": [
+        "max_position_embeddings",
+        "attn_layer_offset",
+        "attn_layer_period",
+        "expert_layer_offset",
+        "expert_layer_period",
+    ],
+    "Gemma2Config": ["tie_word_embeddings"],
     # used to compute the property `self.chunk_length`
     "EncodecConfig": ["overlap"],
+    # used to compute the property `self.layers_block_type`
+    "RecurrentGemmaConfig": ["block_types"],
+    # used as in the config to define `intermediate_size`
+    "MambaConfig": ["expand"],
     # used as `self.bert_model = BertModel(config, ...)`
     "DPRConfig": True,
+    "FuyuConfig": True,
     # not used in modeling files, but it's an important information
     "FSMTConfig": ["langs"],
     # used internally in the configuration class file
@@ -47,15 +62,16 @@ SPECIAL_CASES_TO_ALLOW = {
     # `ignore_value` used during training (despite we don't have training script for these models yet)
     # `norm` used in conversion script (despite not using in the modeling file)
     "OneFormerConfig": ["ignore_value", "norm"],
-    # used during preprocessing and collation, see `collating_graphormer.py`
-    "GraphormerConfig": ["spatial_pos_max"],
     # used internally in the configuration class file
     "T5Config": ["feed_forward_proj"],
     # used internally in the configuration class file
     # `tokenizer_class` get default value `T5Tokenizer` intentionally
     "MT5Config": ["feed_forward_proj", "tokenizer_class"],
+    "UMT5Config": ["feed_forward_proj", "tokenizer_class"],
     # used internally in the configuration class file
     "LongT5Config": ["feed_forward_proj"],
+    # used internally in the configuration class file
+    "Pop2PianoConfig": ["feed_forward_proj"],
     # used internally in the configuration class file
     "SwitchTransformersConfig": ["feed_forward_proj"],
     # having default values other than `1e-5` - we can't fix them without breaking
@@ -68,10 +84,6 @@ SPECIAL_CASES_TO_ALLOW = {
     "CvtConfig": ["layer_norm_eps"],
     # having default values other than `1e-5` - we can't fix them without breaking
     "PerceiverConfig": ["layer_norm_eps"],
-    # having default values other than `1e-5` - we can't fix them without breaking
-    "RetriBertConfig": ["layer_norm_eps"],
-    # having default values other than `1e-5` - we can't fix them without breaking
-    "TrajectoryTransformerConfig": ["layer_norm_eps"],
     # used internally to calculate the feature size
     "InformerConfig": ["num_static_real_features", "num_time_features"],
     # used internally to calculate the feature size
@@ -84,6 +96,35 @@ SPECIAL_CASES_TO_ALLOW = {
     "ClapAudioConfig": ["num_classes"],
     # Not used, but providing useful information to users
     "SpeechT5HifiGanConfig": ["sampling_rate"],
+    # used internally in the configuration class file
+    "UdopConfig": ["feed_forward_proj"],
+    # Actually used in the config or generation config, in that case necessary for the sub-components generation
+    "SeamlessM4TConfig": [
+        "max_new_tokens",
+        "t2u_max_new_tokens",
+        "t2u_decoder_attention_heads",
+        "t2u_decoder_ffn_dim",
+        "t2u_decoder_layers",
+        "t2u_encoder_attention_heads",
+        "t2u_encoder_ffn_dim",
+        "t2u_encoder_layers",
+        "t2u_max_position_embeddings",
+    ],
+    # Actually used in the config or generation config, in that case necessary for the sub-components generation
+    "SeamlessM4Tv2Config": [
+        "max_new_tokens",
+        "t2u_decoder_attention_heads",
+        "t2u_decoder_ffn_dim",
+        "t2u_decoder_layers",
+        "t2u_encoder_attention_heads",
+        "t2u_encoder_ffn_dim",
+        "t2u_encoder_layers",
+        "t2u_max_position_embeddings",
+        "t2u_variance_pred_dropout",
+        "t2u_variance_predictor_embed_dim",
+        "t2u_variance_predictor_hidden_dim",
+        "t2u_variance_predictor_kernel_size",
+    ],
 }
 
 
@@ -92,20 +133,19 @@ SPECIAL_CASES_TO_ALLOW.update(
     {
         "CLIPSegConfig": True,
         "DeformableDetrConfig": True,
-        "DetaConfig": True,
         "DinatConfig": True,
         "DonutSwinConfig": True,
-        "EfficientFormerConfig": True,
+        "FastSpeech2ConformerConfig": True,
         "FSMTConfig": True,
-        "JukeboxConfig": True,
         "LayoutLMv2Config": True,
         "MaskFormerSwinConfig": True,
         "MT5Config": True,
-        "NatConfig": True,
+        # For backward compatibility with trust remote code models
+        "MptConfig": True,
+        "MptAttentionConfig": True,
         "OneFormerConfig": True,
         "PerceiverConfig": True,
         "RagConfig": True,
-        "RetriBertConfig": True,
         "SpeechT5Config": True,
         "SwinConfig": True,
         "Swin2SRConfig": True,
@@ -113,17 +153,17 @@ SPECIAL_CASES_TO_ALLOW.update(
         "SwitchTransformersConfig": True,
         "TableTransformerConfig": True,
         "TapasConfig": True,
-        "TrajectoryTransformerConfig": True,
-        "TransfoXLConfig": True,
         "UniSpeechConfig": True,
         "UniSpeechSatConfig": True,
-        "VanConfig": True,
         "WavLMConfig": True,
         "WhisperConfig": True,
         # TODO: @Arthur (for `alignment_head` and `alignment_layer`)
         "JukeboxPriorConfig": True,
         # TODO: @Younes (for `is_decoder`)
         "Pix2StructTextConfig": True,
+        "IdeficsConfig": True,
+        "IdeficsVisionConfig": True,
+        "IdeficsPerceiverConfig": True,
     }
 )
 
@@ -188,6 +228,13 @@ def check_attribute_being_used(config_class, attributes, default_value, source_s
         "use_cache",
         "out_features",
         "out_indices",
+        "sampling_rate",
+        # backbone related arguments passed to load_backbone
+        "use_pretrained_backbone",
+        "backbone",
+        "backbone_config",
+        "use_timm_backbone",
+        "backbone_kwargs",
     ]
     attributes_used_in_generation = ["encoder_no_repeat_ngram_size"]
 
@@ -244,7 +291,7 @@ def check_config_attributes_being_used(config_class):
     modeling_sources = []
     for path in modeling_paths:
         if os.path.isfile(path):
-            with open(path) as fp:
+            with open(path, encoding="utf8") as fp:
                 modeling_sources.append(fp.read())
 
     unused_attributes = []
@@ -266,6 +313,9 @@ def check_config_attributes():
     """Check the arguments in `__init__` of all configuration classes are used in  python files"""
     configs_with_unused_attributes = {}
     for _config_class in list(CONFIG_MAPPING.values()):
+        # Skip deprecated models
+        if "models.deprecated" in _config_class.__module__:
+            continue
         # Some config classes are not in `CONFIG_MAPPING` (e.g. `CLIPVisionConfig`, `Blip2VisionConfig`, etc.)
         config_classes_in_module = [
             cls

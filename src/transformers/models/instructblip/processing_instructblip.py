@@ -19,9 +19,10 @@ Processor class for InstructBLIP. Largely copy of Blip2Processor with addition o
 import os
 from typing import List, Optional, Union
 
+from ...image_processing_utils import BatchFeature
 from ...image_utils import ImageInput
 from ...processing_utils import ProcessorMixin
-from ...tokenization_utils_base import BatchEncoding, PaddingStrategy, PreTokenizedInput, TextInput, TruncationStrategy
+from ...tokenization_utils_base import PaddingStrategy, PreTokenizedInput, TextInput, TruncationStrategy
 from ...utils import TensorType
 from ..auto import AutoTokenizer
 
@@ -42,6 +43,7 @@ class InstructBlipProcessor(ProcessorMixin):
         qformer_tokenizer (`AutoTokenizer`):
             An instance of ['PreTrainedTokenizer`]. The Q-Former tokenizer is a required input.
     """
+
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "BlipImageProcessor"
     tokenizer_class = "AutoTokenizer"
@@ -71,7 +73,7 @@ class InstructBlipProcessor(ProcessorMixin):
         verbose: bool = True,
         return_tensors: Optional[Union[str, TensorType]] = None,
         **kwargs,
-    ) -> BatchEncoding:
+    ) -> BatchFeature:
         """
         This method uses [`BlipImageProcessor.__call__`] method to prepare image(s) for the model, and
         [`BertTokenizerFast.__call__`] to prepare text for the model.
@@ -81,7 +83,7 @@ class InstructBlipProcessor(ProcessorMixin):
         if images is None and text is None:
             raise ValueError("You have to specify at least images or text.")
 
-        encoding = BatchEncoding()
+        encoding = BatchFeature()
 
         if text is not None:
             text_encoding = self.tokenizer(
@@ -141,8 +143,8 @@ class InstructBlipProcessor(ProcessorMixin):
     # Copied from transformers.models.blip.processing_blip.BlipProcessor.decode with BertTokenizerFast->PreTrainedTokenizer
     def decode(self, *args, **kwargs):
         """
-        This method forwards all its arguments to PreTrainedTokenizer's [`~PreTrainedTokenizer.decode`]. Please refer
-        to the docstring of this method for more information.
+        This method forwards all its arguments to PreTrainedTokenizer's [`~PreTrainedTokenizer.decode`]. Please refer to
+        the docstring of this method for more information.
         """
         return self.tokenizer.decode(*args, **kwargs)
 

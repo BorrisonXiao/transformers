@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TensorFlow Whisper model. """
+"""Testing suite for the TensorFlow Whisper model."""
 
 from __future__ import annotations
 
@@ -42,7 +42,11 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers import TFWhisperForConditionalGeneration, TFWhisperModel, set_seed
-    from transformers.models.whisper.modeling_tf_whisper import TFWhisperDecoder, TFWhisperEncoder
+    from transformers.models.whisper.modeling_tf_whisper import (
+        TFWhisperDecoder,
+        TFWhisperEncoder,
+        sinusoidal_embedding_init,
+    )
 
 
 def prepare_whisper_inputs_dict(
@@ -268,6 +272,11 @@ class TFWhisperModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     input_name = "input_features"
 
+    # TODO (ydshieh): undo skip once a fix is done on TF side.
+    @unittest.skip("Skip for now as TF 2.13 breaks it on GPU")
+    def test_xla_generate_slow(self):
+        super().test_xla_generate_slow()
+
     def setUp(self):
         self.model_tester = TFWhisperModelTester(self)
         self.config_tester = ConfigTester(self, config_class=WhisperConfig)
@@ -281,7 +290,7 @@ class TFWhisperModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestC
         for model_class in self.all_model_classes:
             model = model_class(config)
 
-            model.build()
+            model.build_in_name_scope()
 
             with tempfile.TemporaryDirectory() as tmpdirname:
                 model.save_pretrained(tmpdirname, saved_model=False)
@@ -291,6 +300,23 @@ class TFWhisperModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_model_forward(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model_forward(*config_and_inputs)
+
+    def test_requires_grad_encoder_embed_positions(self):
+        config = self.model_tester.get_config()
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            encoder = model.get_encoder()
+            self.assertFalse(encoder.embed_positions.trainable)
+
+    def test_encoder_sinusoidal_embed_positions(self):
+        config = self.model_tester.get_config()
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            model.build_in_name_scope()
+
+            embeds = model.get_encoder().embed_positions.get_weights()[0]
+            sinusoids = sinusoidal_embedding_init(embeds.shape).numpy()
+            self.assertTrue(np.allclose(embeds, sinusoids))
 
     def test_decoder_model_past_with_large_inputs(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -678,7 +704,7 @@ class TFWhisperModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
 
 def _load_datasamples(num_samples):
-    ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+    ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True)
     # automatic decoding with librispeech
     speech_samples = ds.sort("id").select(range(num_samples))[:num_samples]["audio"]
 
@@ -769,7 +795,7 @@ def _test_large_generation_multilingual(in_queue, out_queue, timeout):
         processor = WhisperProcessor.from_pretrained("openai/whisper-large")
         model = TFWhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
 
-        ds = load_dataset("common_voice", "ja", split="test", streaming=True)
+        ds = load_dataset("legacy-datasets/common_voice", "ja", split="test", streaming=True, trust_remote_code=True)
         ds = ds.cast_column("audio", datasets.Audio(sampling_rate=16_000))
         input_speech = next(iter(ds))["audio"]["array"]
         input_features = processor.feature_extractor(raw_speech=input_speech, return_tensors="tf").input_features

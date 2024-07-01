@@ -18,11 +18,11 @@ import numpy as np
 import requests
 
 from ..utils import add_end_docstrings, is_torch_available, is_torchaudio_available, logging
-from .base import PIPELINE_INIT_ARGS, Pipeline
+from .base import Pipeline, build_pipeline_init_args
 
 
 if is_torch_available():
-    from ..models.auto.modeling_auto import MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING
+    from ..models.auto.modeling_auto import MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES
 
 logger = logging.get_logger(__name__)
 
@@ -63,7 +63,7 @@ def ffmpeg_read(bpayload: bytes, sampling_rate: int) -> np.array:
     return audio
 
 
-@add_end_docstrings(PIPELINE_INIT_ARGS)
+@add_end_docstrings(build_pipeline_init_args(has_feature_extractor=True))
 class AudioClassificationPipeline(Pipeline):
     """
     Audio classification pipeline using any `AutoModelForAudioClassification`. This pipeline predicts the class of a
@@ -98,7 +98,7 @@ class AudioClassificationPipeline(Pipeline):
         if self.framework != "pt":
             raise ValueError(f"The {self.__class__} is only available in PyTorch.")
 
-        self.check_model_type(MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING)
+        self.check_model_type(MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES)
 
     def __call__(
         self,

@@ -33,13 +33,14 @@ from transformers.utils import direct_transformers_import, logging
 
 from .pipelines.test_pipelines_audio_classification import AudioClassificationPipelineTests
 from .pipelines.test_pipelines_automatic_speech_recognition import AutomaticSpeechRecognitionPipelineTests
-from .pipelines.test_pipelines_conversational import ConversationalPipelineTests
 from .pipelines.test_pipelines_depth_estimation import DepthEstimationPipelineTests
 from .pipelines.test_pipelines_document_question_answering import DocumentQuestionAnsweringPipelineTests
 from .pipelines.test_pipelines_feature_extraction import FeatureExtractionPipelineTests
 from .pipelines.test_pipelines_fill_mask import FillMaskPipelineTests
 from .pipelines.test_pipelines_image_classification import ImageClassificationPipelineTests
+from .pipelines.test_pipelines_image_feature_extraction import ImageFeatureExtractionPipelineTests
 from .pipelines.test_pipelines_image_segmentation import ImageSegmentationPipelineTests
+from .pipelines.test_pipelines_image_to_image import ImageToImagePipelineTests
 from .pipelines.test_pipelines_image_to_text import ImageToTextPipelineTests
 from .pipelines.test_pipelines_mask_generation import MaskGenerationPipelineTests
 from .pipelines.test_pipelines_object_detection import ObjectDetectionPipelineTests
@@ -49,6 +50,7 @@ from .pipelines.test_pipelines_table_question_answering import TQAPipelineTests
 from .pipelines.test_pipelines_text2text_generation import Text2TextGenerationPipelineTests
 from .pipelines.test_pipelines_text_classification import TextClassificationPipelineTests
 from .pipelines.test_pipelines_text_generation import TextGenerationPipelineTests
+from .pipelines.test_pipelines_text_to_audio import TextToAudioPipelineTests
 from .pipelines.test_pipelines_token_classification import TokenClassificationPipelineTests
 from .pipelines.test_pipelines_translation import TranslationPipelineTests
 from .pipelines.test_pipelines_video_classification import VideoClassificationPipelineTests
@@ -62,13 +64,14 @@ from .pipelines.test_pipelines_zero_shot_object_detection import ZeroShotObjectD
 pipeline_test_mapping = {
     "audio-classification": {"test": AudioClassificationPipelineTests},
     "automatic-speech-recognition": {"test": AutomaticSpeechRecognitionPipelineTests},
-    "conversational": {"test": ConversationalPipelineTests},
     "depth-estimation": {"test": DepthEstimationPipelineTests},
     "document-question-answering": {"test": DocumentQuestionAnsweringPipelineTests},
     "feature-extraction": {"test": FeatureExtractionPipelineTests},
     "fill-mask": {"test": FillMaskPipelineTests},
     "image-classification": {"test": ImageClassificationPipelineTests},
+    "image-feature-extraction": {"test": ImageFeatureExtractionPipelineTests},
     "image-segmentation": {"test": ImageSegmentationPipelineTests},
+    "image-to-image": {"test": ImageToImagePipelineTests},
     "image-to-text": {"test": ImageToTextPipelineTests},
     "mask-generation": {"test": MaskGenerationPipelineTests},
     "object-detection": {"test": ObjectDetectionPipelineTests},
@@ -78,6 +81,7 @@ pipeline_test_mapping = {
     "text2text-generation": {"test": Text2TextGenerationPipelineTests},
     "text-classification": {"test": TextClassificationPipelineTests},
     "text-generation": {"test": TextGenerationPipelineTests},
+    "text-to-audio": {"test": TextToAudioPipelineTests},
     "token-classification": {"test": TokenClassificationPipelineTests},
     "translation": {"test": TranslationPipelineTests},
     "video-classification": {"test": VideoClassificationPipelineTests},
@@ -244,7 +248,7 @@ class PipelineTesterMixin:
                     f"{self.__class__.__name__}::test_pipeline_{task.replace('-', '_')} is skipped: Could not load the "
                     f"processor from `{repo_id}` with `{processor_name}`."
                 )
-                return
+                self.skipTest(f"Could not load the processor from {repo_id} with {processor_name}.")
 
         # TODO: Maybe not upload such problematic tiny models to Hub.
         if tokenizer is None and processor is None:
@@ -252,7 +256,7 @@ class PipelineTesterMixin:
                 f"{self.__class__.__name__}::test_pipeline_{task.replace('-', '_')} is skipped: Could not find or load "
                 f"any tokenizer / processor from `{repo_id}`."
             )
-            return
+            self.skipTest(f"Could not find or load any tokenizer / processor from {repo_id}.")
 
         # TODO: We should check if a model file is on the Hub repo. instead.
         try:
@@ -262,7 +266,7 @@ class PipelineTesterMixin:
                 f"{self.__class__.__name__}::test_pipeline_{task.replace('-', '_')} is skipped: Could not find or load "
                 f"the model from `{repo_id}` with `{model_architecture}`."
             )
-            return
+            self.skipTest(f"Could not find or load the model from {repo_id} with {model_architecture}.")
 
         pipeline_test_class_name = pipeline_test_mapping[task]["test"].__name__
         if self.is_pipeline_test_to_skip_more(pipeline_test_class_name, model.config, model, tokenizer, processor):
@@ -271,7 +275,9 @@ class PipelineTesterMixin:
                 f"currently known to fail for: model `{model_architecture.__name__}` | tokenizer "
                 f"`{tokenizer_name}` | processor `{processor_name}`."
             )
-            return
+            self.skipTest(
+                f"Test is known to fail for: model `{model_architecture.__name__}` | tokenizer `{tokenizer_name}` | processor `{processor_name}`."
+            )
 
         # validate
         validate_test_components(self, task, model, tokenizer, processor)
@@ -291,7 +297,7 @@ class PipelineTesterMixin:
                 f"{self.__class__.__name__}::test_pipeline_{task.replace('-', '_')} is skipped: Could not get the "
                 "pipeline for testing."
             )
-            return
+            self.skipTest(reason="Could not get the pipeline for testing.")
 
         task_test.run_pipeline_test(pipeline, examples)
 
@@ -321,10 +327,6 @@ class PipelineTesterMixin:
     @is_pipeline_test
     def test_pipeline_automatic_speech_recognition(self):
         self.run_task_tests(task="automatic-speech-recognition")
-
-    @is_pipeline_test
-    def test_pipeline_conversational(self):
-        self.run_task_tests(task="conversational")
 
     @is_pipeline_test
     @require_vision
@@ -366,6 +368,13 @@ class PipelineTesterMixin:
     def test_pipeline_image_to_text(self):
         self.run_task_tests(task="image-to-text")
 
+    @is_pipeline_test
+    @require_timm
+    @require_vision
+    @require_torch
+    def test_pipeline_image_feature_extraction(self):
+        self.run_task_tests(task="image-feature-extraction")
+
     @unittest.skip(reason="`run_pipeline_test` is currently not implemented.")
     @is_pipeline_test
     @require_vision
@@ -404,6 +413,11 @@ class PipelineTesterMixin:
     @require_torch_or_tf
     def test_pipeline_text_generation(self):
         self.run_task_tests(task="text-generation")
+
+    @is_pipeline_test
+    @require_torch
+    def test_pipeline_text_to_audio(self):
+        self.run_task_tests(task="text-to-audio")
 
     @is_pipeline_test
     def test_pipeline_token_classification(self):
@@ -493,8 +507,12 @@ def validate_test_components(test_case, task, model, tokenizer, processor):
     if tokenizer is not None:
         config_vocab_size = getattr(model.config, "vocab_size", None)
         # For CLIP-like models
-        if config_vocab_size is None and hasattr(model.config, "text_config"):
-            config_vocab_size = getattr(model.config.text_config, "vocab_size", None)
+        if config_vocab_size is None:
+            if hasattr(model.config, "text_config"):
+                config_vocab_size = getattr(model.config.text_config, "vocab_size", None)
+            elif hasattr(model.config, "text_encoder"):
+                config_vocab_size = getattr(model.config.text_encoder, "vocab_size", None)
+
         if config_vocab_size is None and model.config.__class__.__name__ not in CONFIG_WITHOUT_VOCAB_SIZE:
             raise ValueError(
                 "Could not determine `vocab_size` from model configuration while `tokenizer` is not `None`."

@@ -13,8 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Fine-pruning Masked BERT for question-answering on SQuAD."""
-
+"""Fine-pruning Masked BERT for question-answering on SQuAD."""
 
 import argparse
 import glob
@@ -789,7 +788,7 @@ def main():
         default=1,
         type=int,
         help=(
-            "Run `initial_warmup` * `warmup_steps` steps of threshold warmup during which threshold stays"
+            "Run `initial_warmup` * `warmup_steps` steps of threshold warmup during which threshold stays "
             "at its `initial_threshold` value (sparsity schedule)."
         ),
     )
@@ -798,7 +797,7 @@ def main():
         default=2,
         type=int,
         help=(
-            "Run `final_warmup` * `warmup_steps` steps of threshold cool-down during which threshold stays"
+            "Run `final_warmup` * `warmup_steps` steps of threshold cool-down during which threshold stays "
             "at its final_threshold value (sparsity schedule)."
         ),
     )
@@ -946,7 +945,7 @@ def main():
         type=str,
         default="O1",
         help=(
-            "For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+            "For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']. "
             "See details at https://nvidia.github.io/apex/amp.html"
         ),
     )

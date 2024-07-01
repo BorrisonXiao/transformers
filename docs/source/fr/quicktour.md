@@ -23,18 +23,20 @@ Soyez opérationnel avec 🤗 Transformers ! Que vous soyez un développeur ou u
 Avant de commencer, assurez-vous que vous avez installé toutes les bibliothèques nécessaires :
 
 ```bash
-!pip install transformers datasets
+!pip install transformers datasets evaluate accelerate
 ```
 
 Vous aurez aussi besoin d'installer votre bibliothèque d'apprentissage profond favorite :
 
 <frameworkcontent>
 <pt>
+
 ```bash
 pip install torch
 ```
 </pt>
 <tf>
+
 ```bash
 pip install tensorflow
 ```
@@ -58,7 +60,7 @@ Le [`pipeline`] est le moyen le plus simple d'utiliser un modèle pré-entraîn�
 | Traduction                  | Traduit du texte d'un langage à un autre                                                                      | Texte                | pipeline(task="translation")                  |
 | Classification d'image       | Attribue une catégorie à une image                                                                           | Image                | pipeline(task="image-classification")         |
 | Segmentation d'image           | Attribue une catégorie à chaque pixel d'une image (supporte la segmentation sémantique, panoptique et d'instance) | Image                | pipeline(task="image-segmentation")           |
-| Détection d'objects             | Prédit les délimitations et catégories d'objects dans une image                                                | Image                | pipeline(task="object-detection")             |
+| Détection d'objets             | Prédit les délimitations et catégories d'objets dans une image                                                | Image                | pipeline(task="object-detection")             |
 | Classification d'audio       | Attribue une catégorie à un fichier audio                                                                    | Audio                | pipeline(task="audio-classification")         |
 | Reconnaissance automatique de la parole | Extrait le discours d'un fichier audio en texte                                                                  | Audio                | pipeline(task="automatic-speech-recognition") |
 | Question réponse visuels    | Etant données une image et une question, répond correctement à une question sur l'image                                   | Modalités multiples  | pipeline(task="vqa")                          |
@@ -71,7 +73,7 @@ Commencez par créer une instance de [`pipeline`] et spécifiez la tâche pour l
 >>> classifier = pipeline("sentiment-analysis")
 ```
 
-Le [`pipeline`] télécharge et stocke en cache un [modèle pré-entraîné](https://huggingface.co/distilbert-base-uncased-finetuned-sst-2-english) et un tokenizer par défaut pour l'analyse des sentiments. Vous pouvez maintenant utiliser le `classifier` sur le texte de votre choix :
+Le [`pipeline`] télécharge et stocke en cache un [modèle pré-entraîné](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english) et un tokenizer par défaut pour l'analyse des sentiments. Vous pouvez maintenant utiliser le `classifier` sur le texte de votre choix :
 
 ```py
 >>> classifier("We are very happy to show you the 🤗 Transformers library.")
@@ -97,7 +99,7 @@ Le [`pipeline`] peut aussi itérer sur un jeu de données entier pour n'importe 
 >>> speech_recognizer = pipeline("automatic-speech-recognition", model="facebook/wav2vec2-base-960h")
 ```
 
-Chargez un jeu de données audio (voir le 🤗 Datasets [Quick Start](https://huggingface.co/docs/datasets/quickstart#audio) pour plus de détails) sur lequel vous souhaitez itérer. Pour cet example, nous chargons le jeu de données [MInDS-14](https://huggingface.co/datasets/PolyAI/minds14) :
+Chargez un jeu de données audio (voir le 🤗 Datasets [Quick Start](https://huggingface.co/docs/datasets/quickstart#audio) pour plus de détails) sur lequel vous souhaitez itérer. Pour cet exemple, nous chargeons le jeu de données [MInDS-14](https://huggingface.co/datasets/PolyAI/minds14) :
 
 ```py
 >>> from datasets import load_dataset, Audio
@@ -153,7 +155,7 @@ Utilisez [`TFAutoModelForSequenceClassification`] et [`AutoTokenizer`] pour char
 </tf>
 </frameworkcontent>
 
-Specifiez le modèle et le tokenizer dans le [`pipeline`], et utilisez le `classifier` sur le texte en français :
+Spécifiez le modèle et le tokenizer dans le [`pipeline`], et utilisez le `classifier` sur le texte en français :
 
 ```py
 >>> classifier = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
@@ -203,6 +205,7 @@ Un tokenizer peut également accepter une liste de textes, et remplir et tronque
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> pt_batch = tokenizer(
 ...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
@@ -214,6 +217,7 @@ Un tokenizer peut également accepter une liste de textes, et remplir et tronque
 ```
 </pt>
 <tf>
+
 ```py
 >>> tf_batch = tokenizer(
 ...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
@@ -346,6 +350,7 @@ Une fonctionnalité particulièrement cool 🤗 Transformers est la possibilité
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> from transformers import AutoModel
 
@@ -354,6 +359,7 @@ Une fonctionnalité particulièrement cool 🤗 Transformers est la possibilité
 ```
 </pt>
 <tf>
+
 ```py
 >>> from transformers import TFAutoModel
 
@@ -372,7 +378,7 @@ Commencez par importer [`AutoConfig`], puis chargez le modèle pré-entraîné q
 ```py
 >>> from transformers import AutoConfig
 
->>> my_config = AutoConfig.from_pretrained("distilbert-base-uncased", n_heads=12)
+>>> my_config = AutoConfig.from_pretrained("distilbert/distilbert-base-uncased", n_heads=12)
 ```
 
 <frameworkcontent>
@@ -409,10 +415,10 @@ En fonction de votre tâche, vous passerez généralement les paramètres suivan
    ```py
    >>> from transformers import AutoModelForSequenceClassification
 
-   >>> model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+   >>> model = AutoModelForSequenceClassification.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
-2. [`TrainingArguments`] contient les hyperparamètres du modèle que vous pouvez changer comme le taux d'apprentissage, la taille due l'échantillon, et le nombre d'époques pour s'entraîner. Les valeurs par défaut sont utilisées si vous ne spécifiez pas d'hyperparamètres d'apprentissage :
+2. [`TrainingArguments`] contient les hyperparamètres du modèle que vous pouvez changer comme le taux d'apprentissage, la taille de l'échantillon, et le nombre d'époques pour s'entraîner. Les valeurs par défaut sont utilisées si vous ne spécifiez pas d'hyperparamètres d'apprentissage :
 
    ```py
    >>> from transformers import TrainingArguments
@@ -431,7 +437,7 @@ En fonction de votre tâche, vous passerez généralement les paramètres suivan
    ```py
    >>> from transformers import AutoTokenizer
 
-   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 4. Chargez un jeu de données :
@@ -492,7 +498,7 @@ Pour les tâches - comme la traduction ou la génération de résumé - qui util
 
 Vous pouvez personnaliser le comportement de la boucle d'apprentissage en redéfinissant les méthodes à l'intérieur de [`Trainer`]. Cela vous permet de personnaliser des caractéristiques telles que la fonction de perte, l'optimiseur et le planificateur. Consultez la documentation de [`Trainer`] pour savoir quelles méthodes peuvent être redéfinies. 
 
-L'autre moyen de personnaliser la boucle d'apprentissage est d'utiliser les [Callbacks](./main_classes/callbacks). Vous pouvez utiliser les callbacks pour intégrer d'autres bibliothèques et inspecter la boucle d'apprentissage afin de suivre la progression ou d'arrêter l'apprentissage plus tôt. Les callbacks ne modifient rien dans la boucle d'apprentissage elle-même. Pour personnaliser quelque chose comme la fonction de perte, vous devez redéfinir le [`Trainer`] à la place.
+L'autre moyen de personnaliser la boucle d'apprentissage est d'utiliser les [Callbacks](./main_classes/callback). Vous pouvez utiliser les callbacks pour intégrer d'autres bibliothèques et inspecter la boucle d'apprentissage afin de suivre la progression ou d'arrêter l'apprentissage plus tôt. Les callbacks ne modifient rien dans la boucle d'apprentissage elle-même. Pour personnaliser quelque chose comme la fonction de perte, vous devez redéfinir le [`Trainer`] à la place.
 
 ## Entraînement avec TensorFlow
 
@@ -503,7 +509,7 @@ Tous les modèles sont des modèles standard [`tf.keras.Model`](https://www.tens
    ```py
    >>> from transformers import TFAutoModelForSequenceClassification
 
-   >>> model = TFAutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+   >>> model = TFAutoModelForSequenceClassification.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 2. Une classe de prétraitement comme un tokenizer, un processeur d'images ou un extracteur de caractéristiques :
@@ -511,7 +517,7 @@ Tous les modèles sont des modèles standard [`tf.keras.Model`](https://www.tens
    ```py
    >>> from transformers import AutoTokenizer
 
-   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 3. Créez une fonction qui transforme le texte du jeu de données en token :

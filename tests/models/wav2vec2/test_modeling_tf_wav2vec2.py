@@ -130,7 +130,7 @@ class TFWav2Vec2ModelTester:
         conv_bias=False,
         num_conv_pos_embeddings=16,
         num_conv_pos_embedding_groups=2,
-        num_hidden_layers=4,
+        num_hidden_layers=2,
         num_attention_heads=2,
         hidden_dropout_prob=0.1,  # this is most likely not correctly set yet
         intermediate_size=20,
@@ -306,7 +306,7 @@ class TFWav2Vec2ModelTester:
         model = TFWav2Vec2ForCTC(config)
         input_lengths = tf.constant([input_values.shape[-1] // i for i in [4, 2, 1]])
         max_length_labels = model.wav2vec2._get_feat_extract_output_lengths(input_lengths)
-        labels = ids_tensor((input_values.shape[0], min(max_length_labels) - 1), model.config.vocab_size + 100)
+        labels = ids_tensor((input_values.shape[0], min(max_length_labels) - 1), model.config.vocab_size + 500)
         with pytest.raises(ValueError):
             model(input_values, labels=labels)
 
@@ -716,7 +716,9 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
         gc.collect()
 
     def _load_datasamples(self, num_samples):
-        ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+        ds = load_dataset(
+            "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True
+        )
         # automatic decoding with librispeech
         speech_samples = ds.sort("id").filter(
             lambda x: x["id"] in [f"1272-141231-000{i}" for i in range(num_samples)]
@@ -725,7 +727,7 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
         return [x["array"] for x in speech_samples]
 
     def _load_superb(self, task, num_samples):
-        ds = load_dataset("anton-l/superb_dummy", task, split="test")
+        ds = load_dataset("anton-l/superb_dummy", task, split="test", trust_remote_code=True)
 
         return ds[:num_samples]
 
@@ -850,8 +852,9 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
         input_values = inputs.input_values
         attention_mask = inputs.attention_mask
         outputs = model(input_values, attention_mask)
-        predicted_logits, predicted_ids = tf.math.reduce_max(outputs.logits, axis=-1), tf.argmax(
-            outputs.logits, axis=-1
+        predicted_logits, predicted_ids = (
+            tf.math.reduce_max(outputs.logits, axis=-1),
+            tf.argmax(outputs.logits, axis=-1),
         )
         expected_labels = [7, 6, 10, 9]
         expected_logits = tf.convert_to_tensor([6.1186, 11.8961, 10.2931, 6.0898])
@@ -866,15 +869,18 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
         input_values = inputs.input_values
         attention_mask = inputs.attention_mask
         outputs = model(input_values, attention_mask=attention_mask)
-        predicted_logits_action, predicted_ids_action = tf.math.reduce_max(outputs.logits[:, :6], axis=-1), tf.argmax(
-            outputs.logits[:, :6], axis=-1
+        predicted_logits_action, predicted_ids_action = (
+            tf.math.reduce_max(outputs.logits[:, :6], axis=-1),
+            tf.argmax(outputs.logits[:, :6], axis=-1),
         )
-        predicted_logits_object, predicted_ids_object = tf.math.reduce_max(
-            outputs.logits[:, 6:20], axis=-1
-        ), tf.argmax(outputs.logits[:, 6:20], axis=-1)
-        predicted_logits_location, predicted_ids_location = tf.math.reduce_max(
-            outputs.logits[:, 20:24], axis=-1
-        ), tf.argmax(outputs.logits[:, 20:24], axis=-1)
+        predicted_logits_object, predicted_ids_object = (
+            tf.math.reduce_max(outputs.logits[:, 6:20], axis=-1),
+            tf.argmax(outputs.logits[:, 6:20], axis=-1),
+        )
+        predicted_logits_location, predicted_ids_location = (
+            tf.math.reduce_max(outputs.logits[:, 20:24], axis=-1),
+            tf.argmax(outputs.logits[:, 20:24], axis=-1),
+        )
         expected_labels_action = [0, 0, 2, 3]
         expected_logits_action = tf.convert_to_tensor([0.4568, 11.0848, 1.6621, 9.3841])
         expected_labels_object = [3, 10, 3, 4]
@@ -915,8 +921,9 @@ class TFWav2Vec2ModelIntegrationTest(unittest.TestCase):
         input_values = inputs.input_values
         attention_mask = inputs.attention_mask
         outputs = model(input_values, attention_mask=attention_mask)
-        predicted_logits, predicted_ids = tf.math.reduce_max(outputs.logits, axis=-1), tf.argmax(
-            outputs.logits, axis=-1
+        predicted_logits, predicted_ids = (
+            tf.math.reduce_max(outputs.logits, axis=-1),
+            tf.argmax(outputs.logits, axis=-1),
         )
 
         expected_labels = [1, 1, 2, 2]

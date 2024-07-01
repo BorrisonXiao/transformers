@@ -46,6 +46,7 @@ if is_flax_available():
         WhisperProcessor,
     )
     from transformers.modeling_flax_pytorch_utils import load_flax_weights_in_pytorch_model
+    from transformers.models.whisper.modeling_flax_whisper import sinusoidal_embedding_init
 
 
 @require_flax
@@ -387,6 +388,19 @@ class FlaxWhisperModelTest(FlaxModelTesterMixin, unittest.TestCase):
                     max_diff = (base_params[key] - base_params_from_head[key]).sum().item()
                     self.assertLessEqual(max_diff, 1e-3, msg=f"{key} not identical")
 
+    def test_encoder_sinusoidal_embed_positions(self):
+        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            params = model.params
+            if model.base_model_prefix in params:
+                params = model.params[model.base_model_prefix]
+
+            embeds = params["encoder"]["embed_positions"]["embedding"]
+            sinusoids = sinusoidal_embedding_init(None, embeds.shape)
+            self.assertTrue(jax.numpy.allclose(embeds, sinusoids))
+
 
 @slow
 @require_flax
@@ -396,7 +410,9 @@ class FlaxWhisperModelIntegrationTest(unittest.TestCase):
         return WhisperProcessor.from_pretrained("openai/whisper-base")
 
     def _load_datasamples(self, num_samples):
-        ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+        ds = load_dataset(
+            "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True
+        )
         # automatic decoding with librispeech
         speech_samples = ds.sort("id").select(range(num_samples))[:num_samples]["audio"]
 
@@ -547,7 +563,7 @@ class FlaxWhisperModelIntegrationTest(unittest.TestCase):
         processor = WhisperProcessor.from_pretrained("openai/whisper-large")
         model = FlaxWhisperForConditionalGeneration.from_pretrained("openai/whisper-large", from_pt=True)
 
-        ds = load_dataset("common_voice", "ja", split="test", streaming=True)
+        ds = load_dataset("legacy-datasets/common_voice", "ja", split="test", streaming=True, trust_remote_code=True)
         ds = ds.cast_column("audio", datasets.Audio(sampling_rate=16_000))
         input_speech = next(iter(ds))["audio"]["array"]
         input_features = processor.feature_extractor(raw_speech=input_speech, return_tensors="np")
@@ -656,9 +672,7 @@ class FlaxWhisperModelIntegrationTest(unittest.TestCase):
 
         generated_ids = generate_fn(input_features)
 
-        # fmt: off
-        EXPECTED_OUTPUT = np.array([50258, 50259, 50359, 50364, 2221, 13, 2326, 388, 391, 307, 264, 50244, 295, 264, 2808, 5359, 11, 293, 321, 366, 5404, 281, 2928, 702, 14943, 13, 50692, 50692, 6966, 307, 2221, 13, 2326, 388, 391, 311, 9060, 1570, 1880, 813, 702, 1871, 13, 50926, 50926, 634, 5112, 505, 300, 412, 341, 42729, 3196, 295, 264, 1064, 11, 365, 5272, 293, 12904, 9256, 450, 10539, 51208, 51208, 949, 505, 11, 14138, 10117, 490, 3936, 293, 1080, 3542, 5160, 881, 26336, 281, 264, 1575, 13, 51552, 51552, 634, 575, 12525, 22618, 1968, 6144, 35617, 7354, 1292, 6, 589, 307, 534, 10281, 934, 439, 11, 293, 51836, 51836, 50257])
-        # fmt: on
+        EXPECTED_OUTPUT = np.array([50258, 50259, 50359, 50364, 2221, 13, 2326, 388, 391, 307, 264, 50244, 295, 264, 2808, 5359, 11, 293, 321, 366, 5404, 281, 2928, 702, 14943, 13, 50692, 50692, 6966, 307, 2221, 13, 2326, 388, 391, 311, 9060, 1570, 1880, 813, 702, 1871, 13, 50926, 50926, 634, 5112, 505, 300, 412, 341, 42729, 3196, 295, 264, 1064, 11, 365, 5272, 293, 12904, 9256, 450, 10539, 51208, 51208, 949, 505, 11, 14138, 10117, 490, 3936, 293, 1080, 3542, 5160, 881, 26336, 281, 264, 1575, 13, 51552, 51552, 634, 575, 12525, 22618, 1968, 6144, 35617, 7354, 1292, 6, 589, 307, 534, 10281, 934, 439, 11, 293, 51836, 51836, 50257])  # fmt: skip
 
         self.assertTrue(np.allclose(generated_ids, EXPECTED_OUTPUT))
 

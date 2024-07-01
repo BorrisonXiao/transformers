@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch InstructBLIP model."""
+"""PyTorch InstructBLIP model."""
 
 import math
 from dataclasses import dataclass
@@ -46,11 +46,6 @@ from .configuration_instructblip import InstructBlipConfig, InstructBlipQFormerC
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "Salesforce/instructblip-flan-t5-xl"
-
-INSTRUCTBLIP_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "Salesforce/instructblip-flan-t5-xl",
-    # See all InstructBLIP models at https://huggingface.co/models?filter=instructblip
-]
 
 
 @dataclass
@@ -107,15 +102,51 @@ class InstructBlipVisionEmbeddings(nn.Module):
 
         self.position_embedding = nn.Parameter(torch.randn(1, self.num_positions, self.embed_dim))
 
-    def forward(self, pixel_values: torch.FloatTensor) -> torch.Tensor:
-        batch_size = pixel_values.shape[0]
-        target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(pixel_values)  # shape = [*, width, grid, grid]
-        patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
+    def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        """
+        This method allows to interpolate the pre-trained position encodings, to be able to use the model on higher
+        resolution images.
 
+        Source:
+        https://github.com/facebookresearch/dino/blob/de9ee3df6cf39fac952ab558447af1fa1365362a/vision_transformer.py#L174
+        """
+        num_patches = embeddings.shape[1] - 1
+        num_positions = self.position_embedding.shape[1] - 1
+
+        if num_patches == num_positions and height == width:
+            return self.position_embedding
+
+        class_pos_embed = self.position_embedding[:, 0, :]
+        patch_pos_embed = self.position_embedding[:, 1:, :]
+        dim = embeddings.shape[-1]
+        h0 = height // self.config.patch_size
+        w0 = width // self.config.patch_size
+        # we add a small number to avoid floating point error in the interpolation
+        # see discussion at https://github.com/facebookresearch/dino/issues/8
+        h0, w0 = h0 + 0.1, w0 + 0.1
+        patch_pos_embed = patch_pos_embed.reshape(1, int(math.sqrt(num_positions)), int(math.sqrt(num_positions)), dim)
+        patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed,
+            scale_factor=(h0 / math.sqrt(num_positions), w0 / math.sqrt(num_positions)),
+            mode="bicubic",
+            align_corners=False,
+        )
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
+
+    def forward(self, pixel_values: torch.FloatTensor, interpolate_pos_encoding: bool = False) -> torch.Tensor:
+        batch_size, _, height, width = pixel_values.shape
+        target_dtype = self.patch_embedding.weight.dtype
+        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]
+        patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
         class_embeds = self.class_embedding.expand(batch_size, 1, -1).to(target_dtype)
         embeddings = torch.cat([class_embeds, patch_embeds], dim=1)
-        embeddings = embeddings + self.position_embedding[:, : embeddings.size(1), :].to(target_dtype)
+        if interpolate_pos_encoding:
+            position_embedding = self.interpolate_pos_encoding(embeddings, height, width)
+        else:
+            position_embedding = self.position_embedding
+        embeddings = embeddings + position_embedding[:, : embeddings.size(1), :].to(target_dtype)
         return embeddings
 
 
@@ -275,13 +306,12 @@ class InstructBlipPreTrainedModel(PreTrainedModel):
     config_class = InstructBlipConfig
     base_model_prefix = "blip"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [
-        r"position_ids",
-        r"language_model.encoder.embed_tokens.weight",
-        r"language_model.decoder.embed_tokens.weight",
-        r"language_model.lm_head.weight",
+    _no_split_modules = [
+        "InstructBlipQFormerEmbeddings",
+        "InstructBlipAttention",
+        "InstructBlipQFormerMultiHeadAttention",
+        "InstructBlipQFormerSelfOutput",
     ]
-    _no_split_modules = ["InstructBlipAttention", "InstructBlipQFormerMultiHeadAttention"]
     _keep_in_fp32_modules = []
 
     # Copied from transformers.models.blip_2.modeling_blip_2.Blip2PreTrainedModel._init_weights with Blip2->InstructBlip
@@ -294,7 +324,7 @@ class InstructBlipPreTrainedModel(PreTrainedModel):
                 module.bias.data.zero_()
 
         if isinstance(module, InstructBlipVisionEmbeddings):
-            if hasattr(self.config, "vision_config"):
+            if hasattr(self.config, "vision_config") and not isinstance(self.config, InstructBlipVisionConfig):
                 factor = self.config.vision_config.initializer_range
             nn.init.trunc_normal_(module.position_embedding, mean=0.0, std=factor)
             nn.init.trunc_normal_(module.class_embedding, mean=0.0, std=factor)
@@ -304,10 +334,6 @@ class InstructBlipPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
         elif isinstance(module, nn.Linear) and module.bias is not None:
             module.bias.data.zero_()
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, InstructBlipEncoder):
-            module.gradient_checkpointing = value
 
 
 INSTRUCTBLIP_START_DOCSTRING = r"""
@@ -338,6 +364,8 @@ INSTRUCTBLIP_VISION_INPUTS_DOCSTRING = r"""
             more detail.
         return_dict (`bool`, *optional*):
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
+        interpolate_pos_encoding (`bool`, *optional*, defaults to `False`):
+            Whether to interpolate the pre-trained position encodings.
 """
 
 INSTRUCTBLIP_INPUTS_DOCSTRING = r"""
@@ -401,6 +429,8 @@ INSTRUCTBLIP_INPUTS_DOCSTRING = r"""
             more detail.
         return_dict (`bool`, *optional*):
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
+        interpolate_pos_encoding (`bool`, *optional*, defaults to `False`):
+            Whether to interpolate the pre-trained position encodings.
 """
 
 
@@ -463,17 +493,11 @@ class InstructBlipEncoder(nn.Module):
             if output_hidden_states:
                 encoder_states = encoder_states + (hidden_states,)
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(encoder_layer),
+                layer_outputs = self._gradient_checkpointing_func(
+                    encoder_layer.__call__,
                     hidden_states,
                     attention_mask,
+                    output_attentions,
                 )
             else:
                 layer_outputs = encoder_layer(
@@ -521,6 +545,7 @@ class InstructBlipVisionModel(InstructBlipPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
         r"""
         Returns:
@@ -535,7 +560,7 @@ class InstructBlipVisionModel(InstructBlipPreTrainedModel):
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
-        hidden_states = self.embeddings(pixel_values)
+        hidden_states = self.embeddings(pixel_values, interpolate_pos_encoding=interpolate_pos_encoding)
 
         encoder_outputs = self.encoder(
             inputs_embeds=hidden_states,
@@ -564,7 +589,6 @@ class InstructBlipVisionModel(InstructBlipPreTrainedModel):
         return self.embeddings
 
 
-# Copied from transformers.models.blip_2.modeling_blip_2.Blip2QFormerMultiHeadAttention with Blip2->InstructBlip
 class InstructBlipQFormerMultiHeadAttention(nn.Module):
     def __init__(self, config, is_cross_attention=False):
         super().__init__()
@@ -665,13 +689,14 @@ class InstructBlipQFormerMultiHeadAttention(nn.Module):
                 attention_scores = attention_scores + relative_position_scores_query + relative_position_scores_key
 
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        attention_scores_dtype = attention_scores.dtype
 
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        attention_probs = nn.Softmax(dim=-1)(attention_scores).to(attention_scores_dtype)
 
         if is_cross_attention and self.save_attention:
             self.save_attention_map(attention_probs)
@@ -936,19 +961,12 @@ class InstructBlipQFormerEncoder(nn.Module):
 
             if getattr(self.config, "gradient_checkpointing", False) and self.training:
                 if use_cache:
-                    logger.warn(
+                    logger.warning(
                         "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
                     )
                     use_cache = False
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions, query_length)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
@@ -1011,7 +1029,9 @@ class InstructBlipQFormerEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
 
         self.config = config
@@ -1034,7 +1054,7 @@ class InstructBlipQFormerEmbeddings(nn.Module):
         if input_ids is not None:
             embeddings = self.word_embeddings(input_ids)
             if self.position_embedding_type == "absolute":
-                position_embeddings = self.position_embeddings(position_ids)
+                position_embeddings = self.position_embeddings(position_ids.to(embeddings.device))
                 embeddings = embeddings + position_embeddings
 
             if query_embeds is not None:
@@ -1042,6 +1062,7 @@ class InstructBlipQFormerEmbeddings(nn.Module):
         else:
             embeddings = query_embeds
 
+        embeddings = embeddings.to(self.layernorm.weight.dtype)
         embeddings = self.layernorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
@@ -1122,19 +1143,19 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
 
     def forward(
         self,
-        input_ids,
-        attention_mask=None,
-        position_ids=None,
-        query_embeds=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        past_key_values=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_ids: torch.LongTensor,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        query_embeds: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        encoder_hidden_states: Optional[torch.FloatTensor] = None,
+        encoder_attention_mask: Optional[torch.FloatTensor] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple[torch.FloatTensor], BaseModelOutputWithPoolingAndCrossAttentions]:
         r"""
         encoder_hidden_states  (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
             Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention if
@@ -1191,13 +1212,13 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
         # If a 2D or 3D attention mask is provided for the cross-attention
         # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
         if encoder_hidden_states is not None:
-            if type(encoder_hidden_states) == list:
+            if isinstance(encoder_hidden_states, list):
                 encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states[0].size()
             else:
                 encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states.size()
             encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
 
-            if type(encoder_attention_mask) == list:
+            if isinstance(encoder_attention_mask, list):
                 encoder_extended_attention_mask = [self.invert_attention_mask(mask) for mask in encoder_attention_mask]
             elif encoder_attention_mask is None:
                 encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
@@ -1268,9 +1289,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         self.language_projection = nn.Linear(config.qformer_config.hidden_size, config.text_config.hidden_size)
 
         if config.use_decoder_only_language_model:
-            language_model = AutoModelForCausalLM.from_config(config.text_config)
+            language_model = AutoModelForCausalLM.from_config(
+                config.text_config, attn_implementation=config._attn_implementation
+            )
         else:
-            language_model = AutoModelForSeq2SeqLM.from_config(config.text_config)
+            language_model = AutoModelForSeq2SeqLM.from_config(
+                config.text_config, attn_implementation=config._attn_implementation
+            )
 
         if language_model._no_split_modules is not None:
             self._no_split_modules.extend(language_model._no_split_modules)
@@ -1343,6 +1368,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
         return_dict: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
     ) -> Union[Tuple, InstructBlipForConditionalGenerationModelOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1364,7 +1390,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         >>> processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-vicuna-7b")
 
         >>> device = "cuda" if torch.cuda.is_available() else "cpu"
-        >>> model.to(device)
+        >>> model.to(device)  # doctest: +IGNORE_RESULT
 
         >>> url = "https://raw.githubusercontent.com/salesforce/LAVIS/main/docs/_static/Confusing-Pictures.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw).convert("RGB")
@@ -1384,7 +1410,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         ... )
         >>> generated_text = processor.batch_decode(outputs, skip_special_tokens=True)[0].strip()
         >>> print(generated_text)
-        What is unusual about this image? The image is unusual because it depicts a person standing on top of a car, which is parked on the side of the road. This is an unusual position for a person to be in, as they are typically not expected to stand on top of a car while it is parked. Additionally, the person in the image appears to be wearing a suit and tie, which is not typical attire for someone who is standing on top of a car. It is unclear why the person is in this unusual position or what they are doing there.
+        The unusual aspect of this image is that a man is ironing clothes on the back of a yellow SUV, which is parked in the middle of a busy city street. This is an unconventional approach to ironing clothes, as it requires the man to balance himself and his ironing equipment on top of the vehicle while navigating through traffic. Additionally, the presence of taxis and other vehicles in the scene further emphasizes the unusual nature of this situation.
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -1395,6 +1421,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            interpolate_pos_encoding=interpolate_pos_encoding,
         )
         image_embeds = vision_outputs[0]
 
@@ -1489,6 +1516,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         qformer_attention_mask: Optional[torch.LongTensor] = None,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.LongTensor] = None,
+        interpolate_pos_encoding: bool = False,
         **generate_kwargs,
     ) -> torch.LongTensor:
         """
@@ -1505,6 +1533,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 The sequence used as a prompt for the generation.
             attention_mask (`torch.LongTensor` of shape (batch_size, sequence_length), *optional*):
                 Mask to avoid performing attention on padding token indices.
+            interpolate_pos_encoding (`bool`, *optional*, defaults to `False`):
+                Whether to interpolate the positional encoding of the image embeddings.
 
         Returns:
             captions (list): A list of strings of length batch_size * num_captions.
@@ -1514,7 +1544,11 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             self._preprocess_accelerate()
 
         batch_size = pixel_values.shape[0]
-        image_embeds = self.vision_model(pixel_values, return_dict=True).last_hidden_state
+        image_embeds = self.vision_model(
+            pixel_values,
+            return_dict=True,
+            interpolate_pos_encoding=interpolate_pos_encoding,
+        ).last_hidden_state
 
         image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
 
@@ -1552,10 +1586,33 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         inputs_embeds = self.get_input_embeddings()(input_ids)
         inputs_embeds = torch.cat([language_model_inputs, inputs_embeds.to(language_model_inputs.device)], dim=1)
 
+        # add image_embeds length to max_length, so that the final max_length in counted only on token embeds
+        # -1 is to account for the prepended BOS after `generate.`
+        if not self.language_model.config.is_encoder_decoder:
+            generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20) + language_model_inputs.shape[1] - 1
+            generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0) + language_model_inputs.shape[1]
+
         outputs = self.language_model.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             **generate_kwargs,
         )
+
+        # this is a temporary workaround to be consistent with other generation models and
+        # have BOS as the first token, even though under the hood we are calling LM with embeds
+        if not self.language_model.config.is_encoder_decoder:
+            # the InstructBLIP authors used inconsistent tokenizer/model files during training,
+            # with the tokenizer's bos token being set to </s> which has ID=2,
+            # whereas the model's text config has bos token id = 0
+            bos_token_id = (
+                2
+                if self.config.text_config.architectures[0] == "LLaMAForCausalLM"
+                else self.config.text_config.bos_token_id
+            )
+            bos_tokens = torch.LongTensor([[bos_token_id]]).repeat(batch_size, 1).to(image_embeds.device)
+            if not isinstance(outputs, torch.Tensor):
+                outputs.sequences = torch.cat([bos_tokens, outputs.sequences], dim=-1)
+            else:
+                outputs = torch.cat([bos_tokens, outputs], dim=-1)
 
         return outputs

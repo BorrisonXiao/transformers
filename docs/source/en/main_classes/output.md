@@ -26,8 +26,8 @@ Let's see how this looks in an example:
 from transformers import BertTokenizer, BertForSequenceClassification
 import torch
 
-tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+tokenizer = BertTokenizer.from_pretrained("google-bert/bert-base-uncased")
+model = BertForSequenceClassification.from_pretrained("google-bert/bert-base-uncased")
 
 inputs = tokenizer("Hello, my dog is cute", return_tensors="pt")
 labels = torch.tensor([1]).unsqueeze(0)  # Batch size 1
@@ -39,6 +39,14 @@ documentation of that class below, it means it has an optional `loss`, a `logits
 an optional `attentions` attribute. Here we have the `loss` since we passed along `labels`, but we don't have
 `hidden_states` and `attentions` because we didn't pass `output_hidden_states=True` or
 `output_attentions=True`.
+
+<Tip>
+
+When passing `output_hidden_states=True` you may expect the `outputs.hidden_states[-1]` to match `outputs.last_hidden_states` exactly.
+However, this is not always the case. Some models apply normalization or subsequent process to the last hidden state when it's returned.
+
+</Tip>
+
 
 You can access each attribute as you would usually do, and if that attribute has not been returned by the model, you
 will get `None`. Here for instance `outputs.loss` is the loss computed by the model, and `outputs.attentions` is

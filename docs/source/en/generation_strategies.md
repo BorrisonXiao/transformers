@@ -21,7 +21,7 @@ more. It also plays a role in a variety of mixed-modality applications that have
 and vision-to-text. Some of the models that can generate text include
 GPT2, XLNet, OpenAI GPT, CTRL, TransformerXL, XLM, Bart, T5, GIT, Whisper.
 
-Check out a few examples that use [`~transformers.generation_utils.GenerationMixin.generate`] method to produce
+Check out a few examples that use [`~generation.GenerationMixin.generate`] method to produce
 text outputs for different tasks:
 * [Text summarization](./tasks/summarization#inference)
 * [Image captioning](./model_doc/git#transformers.GitForCausalLM.forward.example)
@@ -54,14 +54,13 @@ When you load a model explicitly, you can inspect the generation configuration t
 ```python
 >>> from transformers import AutoModelForCausalLM
 
->>> model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+>>> model = AutoModelForCausalLM.from_pretrained("distilbert/distilgpt2")
 >>> model.generation_config
 GenerationConfig {
-    "_from_model_config": true,
-    "bos_token_id": 50256,
-    "eos_token_id": 50256,
-    "transformers_version": "4.26.0.dev0"
+  "bos_token_id": 50256,
+  "eos_token_id": 50256
 }
+<BLANKLINE>
 ```
 
 Printing out the `model.generation_config` reveals only the values that are different from the default generation
@@ -77,22 +76,23 @@ producing highly repetitive results.
 You can override any `generation_config` by passing the parameters and their values directly to the [`generate`] method:
 
 ```python
->>> my_model.generate(**inputs, num_beams=4, do_sample=True)
+>>> my_model.generate(**inputs, num_beams=4, do_sample=True)  # doctest: +SKIP
 ```
 
 Even if the default decoding strategy mostly works for your task, you can still tweak a few things. Some of the
 commonly adjusted parameters include:
 
 - `max_new_tokens`: the maximum number of tokens to generate. In other words, the size of the output sequence, not
-including the tokens in the prompt.
+including the tokens in the prompt. As an alternative to using the output's length as a stopping criteria, you can choose
+to stop generation whenever the full generation exceeds some amount of time. To learn more, check [`StoppingCriteria`].
 - `num_beams`: by specifying a number of beams higher than 1, you are effectively switching from greedy search to
 beam search. This strategy evaluates several hypotheses at each time step and eventually chooses the hypothesis that
 has the overall highest probability for the entire sequence. This has the advantage of identifying high-probability
-sequences that start with a lower probability initial tokens and would've been ignored by the greedy search.
+sequences that start with a lower probability initial tokens and would've been ignored by the greedy search. Visualize how it works [here](https://huggingface.co/spaces/m-ric/beam_search_visualizer).
 - `do_sample`: if set to `True`, this parameter enables decoding strategies such as multinomial sampling, beam-search
 multinomial sampling, Top-K sampling and Top-p sampling. All these strategies select the next token from the probability
 distribution over the entire vocabulary with various strategy-specific adjustments.
-- `num_return_sequences`: the number of sequence candidates to return for each input. This options is only available for
+- `num_return_sequences`: the number of sequence candidates to return for each input. This option is only available for
 the decoding strategies that support multiple sequence candidates, e.g. variations of beam search and sampling. Decoding
 strategies like greedy search and contrastive search return a single output sequence.
 
@@ -107,11 +107,11 @@ If you would like to share your fine-tuned model with a specific generation conf
 ```python
 >>> from transformers import AutoModelForCausalLM, GenerationConfig
 
->>> model = AutoModelForCausalLM.from_pretrained("my_account/my_model")
+>>> model = AutoModelForCausalLM.from_pretrained("my_account/my_model")  # doctest: +SKIP
 >>> generation_config = GenerationConfig(
 ...     max_new_tokens=50, do_sample=True, top_k=50, eos_token_id=model.config.eos_token_id
 ... )
->>> generation_config.save_pretrained("my_account/my_model", push_to_hub=True)
+>>> generation_config.save_pretrained("my_account/my_model", push_to_hub=True)  # doctest: +SKIP
 ```
 
 You can also store several generation configurations in a single directory, making use of the `config_file_name`
@@ -122,8 +122,8 @@ one for summarization with beam search). You must have the right Hub permissions
 ```python
 >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, GenerationConfig
 
->>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
->>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
+>>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+>>> model = AutoModelForSeq2SeqLM.from_pretrained("google-t5/t5-small")
 
 >>> translation_generation_config = GenerationConfig(
 ...     num_beams=4,
@@ -133,19 +133,20 @@ one for summarization with beam search). You must have the right Hub permissions
 ...     pad_token=model.config.pad_token_id,
 ... )
 
->>> translation_generation_config.save_pretrained("t5-small", "translation_generation_config.json", push_to_hub=True)
+>>> # Tip: add `push_to_hub=True` to push to the Hub
+>>> translation_generation_config.save_pretrained("/tmp", "translation_generation_config.json")
 
 >>> # You could then use the named generation config file to parameterize generation
->>> generation_config = GenerationConfig.from_pretrained("t5-small", "translation_generation_config.json")
+>>> generation_config = GenerationConfig.from_pretrained("/tmp", "translation_generation_config.json")
 >>> inputs = tokenizer("translate English to French: Configuration files are easy to use!", return_tensors="pt")
 >>> outputs = model.generate(**inputs, generation_config=generation_config)
 >>> print(tokenizer.batch_decode(outputs, skip_special_tokens=True))
-['Les fichiers de configuration sont faciles à utiliser !']
+['Les fichiers de configuration sont faciles à utiliser!']
 ```
 
 ## Streaming
 
-The `generate()` supports streaming, through its `streamer` input. The `streamer` input is compatible any instance
+The `generate()` supports streaming, through its `streamer` input. The `streamer` input is compatible with any instance
 from a class that has the following methods: `put()` and `end()`. Internally, `put()` is used to push new tokens and
 `end()` is used to flag the end of text generation.
 
@@ -162,8 +163,8 @@ your screen, one word at a time:
 ```python
 >>> from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
->>> tok = AutoTokenizer.from_pretrained("gpt2")
->>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+>>> tok = AutoTokenizer.from_pretrained("openai-community/gpt2")
+>>> model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
 >>> inputs = tok(["An increasing sequence: one,"], return_tensors="pt")
 >>> streamer = TextStreamer(tok)
 
@@ -171,6 +172,92 @@ your screen, one word at a time:
 >>> _ = model.generate(**inputs, streamer=streamer, max_new_tokens=20)
 An increasing sequence: one, two, three, four, five, six, seven, eight, nine, ten, eleven,
 ```
+
+
+## KV Cache Quantization
+
+The `generate()` method supports caching keys and values to enhance efficiency and avoid re-computations. However the key and value
+cache can occupy a large portion of memory, becoming a bottleneck for long-context generation, especially for Large Language Models.
+Quantizing the cache when using `generate()` can significantly reduce memory requirements at the cost of speed. 
+
+KV Cache quantization in `transformers` is largely inspired by the paper [KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache]
+(https://arxiv.org/abs/2402.02750) and currently supports `quanto` and `HQQ` as backends. For more information on the inner workings see the paper.
+
+To enable quantization of the key-value cache, one needs to indicate `cache_implementation="quantized"` in the `generation_config`.
+Quantization related arguments should be passed to the `generation_config` either as a `dict` or an instance of a [`QuantizedCacheConfig`] class.
+One has to indicate which quantization backend to use in the [`QuantizedCacheConfig`], the default is `quanto`.
+
+<Tip warning={true}>
+
+Cache quantization can be detrimental if the context length is short and there is enough GPU VRAM available to run without cache quantization.
+
+</Tip>
+
+
+```python
+>>> import torch
+>>> from transformers import AutoTokenizer, AutoModelForCausalLM
+
+>>> tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+>>> model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf", torch_dtype=torch.float16).to("cuda:0")
+>>> inputs = tokenizer("I like rock music because", return_tensors="pt").to(model.device)
+
+>>> out = model.generate(**inputs, do_sample=False, max_new_tokens=20, cache_implementation="quantized", cache_config={"nbits": 4, "backend": "quanto"})
+>>> print(tokenizer.batch_decode(out, skip_special_tokens=True)[0])
+I like rock music because it's loud and energetic. It's a great way to express myself and rel
+
+>>> out = model.generate(**inputs, do_sample=False, max_new_tokens=20)
+>>> print(tokenizer.batch_decode(out, skip_special_tokens=True)[0])
+I like rock music because it's loud and energetic. I like to listen to it when I'm feeling
+```
+
+## Watermarking
+
+The `generate()` supports watermarking the generated text by randomly marking a portion of tokens as "green". 
+When generating the "green" will have a small 'bias' value added to their logits, thus having a higher chance to be generated.
+The watermarked text can be detected by calculating the proportion of "green" tokens in the text and estimating how likely it is
+statistically to obtain that amount of "green" tokens for human-generated text. This watermarking strategy was proposed in the paper 
+["On the Reliability of Watermarks for Large Language Models"](https://arxiv.org/abs/2306.04634). For more information on 
+the inner functioning of watermarking, it is recommended to refer to the paper.
+
+The watermarking can be used with any generative model in `tranformers` and does not require an extra classification model
+to detect watermarked text. To trigger watermarking, pass in a [`WatermarkingConfig`] with needed arguments directly to the
+`.generate()` method or add it to the [`GenerationConfig`]. Watermarked text can be later detected with a [`WatermarkDetector`].
+
+
+<Tip warning={true}>
+
+The WatermarkDetector internally relies on the proportion of "green" tokens, and whether generated text follows the coloring pattern.
+That is why it is recommended to strip off the prompt text, if it is much longer than the generated text.
+This also can have an effect when one sequence in the batch is a lot longer causing other rows to be padded.
+Additionally, the detector **must** be initiated with identical watermark configuration arguments used when generating.
+
+</Tip>
+
+Let's generate some text with watermarking. In the below code snippet, we set the bias to 2.5 which is a value that
+will be added to "green" tokens' logits. After generating watermarked text, we can pass it directly to the `WatermarkDetector`
+to check if the text is machine-generated (outputs `True` for machine-generated and `False` otherwise).
+
+```python
+>>> from transformers import AutoTokenizer, AutoModelForCausalLM, WatermarkDetector, WatermarkingConfig
+
+>>> model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
+>>> tok = AutoTokenizer.from_pretrained("openai-community/gpt2")
+>>> tok.pad_token_id = tok.eos_token_id
+>>> tok.padding_side = "left"
+
+>>> inputs = tok(["This is the beginning of a long story", "Alice and Bob are"], padding=True, return_tensors="pt")
+>>> input_len = inputs["input_ids"].shape[-1]
+
+>>> watermarking_config = WatermarkingConfig(bias=2.5, seeding_scheme="selfhash")
+>>> out = model.generate(**inputs, watermarking_config=watermarking_config, do_sample=False, max_length=20)
+
+>>> detector = WatermarkDetector(model_config=model.config, device="cpu", watermarking_config=watermarking_config)
+>>> detection_out = detector(out, return_dict=True)
+>>> detection_out.prediction
+array([True, True])
+```
+
 
 ## Decoding strategies
 
@@ -187,7 +274,7 @@ Here, we'll show some of the parameters that control the decoding strategies and
 >>> from transformers import AutoModelForCausalLM, AutoTokenizer
 
 >>> prompt = "I look forward to"
->>> checkpoint = "distilgpt2"
+>>> checkpoint = "distilbert/distilgpt2"
 
 >>> tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 >>> inputs = tokenizer(prompt, return_tensors="pt")
@@ -208,7 +295,7 @@ The two main parameters that enable and control the behavior of contrastive sear
 ```python
 >>> from transformers import AutoTokenizer, AutoModelForCausalLM
 
->>> checkpoint = "gpt2-large"
+>>> checkpoint = "openai-community/gpt2-large"
 >>> tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 >>> model = AutoModelForCausalLM.from_pretrained(checkpoint)
 
@@ -217,10 +304,9 @@ The two main parameters that enable and control the behavior of contrastive sear
 
 >>> outputs = model.generate(**inputs, penalty_alpha=0.6, top_k=4, max_new_tokens=100)
 >>> tokenizer.batch_decode(outputs, skip_special_tokens=True)
-['Hugging Face Company is a family owned and operated business. \
-We pride ourselves on being the best in the business and our customer service is second to none.\
-\n\nIf you have any questions about our products or services, feel free to contact us at any time.\
- We look forward to hearing from you!']
+['Hugging Face Company is a family owned and operated business. We pride ourselves on being the best
+in the business and our customer service is second to none.\n\nIf you have any questions about our
+products or services, feel free to contact us at any time. We look forward to hearing from you!']
 ```
 
 ### Multinomial sampling
@@ -233,9 +319,10 @@ risk of repetition.
 To enable multinomial sampling set `do_sample=True` and `num_beams=1`.
 
 ```python
->>> from transformers import AutoTokenizer, AutoModelForCausalLM
+>>> from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
+>>> set_seed(0)  # For reproducibility
 
->>> checkpoint = "gpt2-large"
+>>> checkpoint = "openai-community/gpt2-large"
 >>> tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 >>> model = AutoModelForCausalLM.from_pretrained(checkpoint)
 
@@ -244,11 +331,7 @@ To enable multinomial sampling set `do_sample=True` and `num_beams=1`.
 
 >>> outputs = model.generate(**inputs, do_sample=True, num_beams=1, max_new_tokens=100)
 >>> tokenizer.batch_decode(outputs, skip_special_tokens=True)
-['Today was an amazing day because we are now in the final stages of our trip to New York City which was very tough. \
-It is a difficult schedule and a challenging part of the year but still worth it. I have been taking things easier and \
-I feel stronger and more motivated to be out there on their tour. Hopefully, that experience is going to help them with \
-their upcoming events which are currently scheduled in Australia.\n\nWe love that they are here. They want to make a \
-name for themselves and become famous for what they']
+["Today was an amazing day because we received these wonderful items by the way of a gift shop. The box arrived on a Thursday and I opened it on Monday afternoon to receive the gifts. Both bags featured pieces from all the previous years!\n\nThe box had lots of surprises in it, including some sweet little mini chocolate chips! I don't think I'd eat all of these. This was definitely one of the most expensive presents I have ever got, I actually got most of them for free!\n\nThe first package came"]
 ```
 
 ### Beam-search decoding
@@ -257,13 +340,19 @@ Unlike greedy search, beam-search decoding keeps several hypotheses at each time
 the hypothesis that has the overall highest probability for the entire sequence. This has the advantage of identifying high-probability
 sequences that start with lower probability initial tokens and would've been ignored by the greedy search.
 
+<a href="https://huggingface.co/spaces/m-ric/beam_search_visualizer" class="flex flex-col justify-center">
+    <img style="max-width: 90%; margin: auto;" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/beam_search.png"/>
+</a>
+
+You can visualize how beam-search decoding works in [this interactive demo](https://huggingface.co/spaces/m-ric/beam_search_visualizer): type your input sentence, and play with the parameters to see how the decoding beams change.
+
 To enable this decoding strategy, specify the `num_beams` (aka number of hypotheses to keep track of) that is greater than 1.
 
 ```python
 >>> from transformers import AutoModelForCausalLM, AutoTokenizer
 
 >>> prompt = "It is astonishing how one can"
->>> checkpoint = "gpt2-medium"
+>>> checkpoint = "openai-community/gpt2-medium"
 
 >>> tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 >>> inputs = tokenizer(prompt, return_tensors="pt")
@@ -272,7 +361,7 @@ To enable this decoding strategy, specify the `num_beams` (aka number of hypothe
 
 >>> outputs = model.generate(**inputs, num_beams=5, max_new_tokens=50)
 >>> tokenizer.batch_decode(outputs, skip_special_tokens=True)
-['It is astonishing how one can have such a profound impact on the lives of so many people in such a short period of \
+['It is astonishing how one can have such a profound impact on the lives of so many people in such a short period of
 time."\n\nHe added: "I am very proud of the work I have been able to do in the last few years.\n\n"I have']
 ```
 
@@ -282,10 +371,11 @@ As the name implies, this decoding strategy combines beam search with multinomia
 the `num_beams` greater than 1, and set `do_sample=True` to use this decoding strategy.
 
 ```python
->>> from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+>>> from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, set_seed
+>>> set_seed(0)  # For reproducibility
 
 >>> prompt = "translate English to German: The house is wonderful."
->>> checkpoint = "t5-small"
+>>> checkpoint = "google-t5/t5-small"
 
 >>> tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 >>> inputs = tokenizer(prompt, return_tensors="pt")
@@ -301,49 +391,56 @@ the `num_beams` greater than 1, and set `do_sample=True` to use this decoding st
 
 The diverse beam search decoding strategy is an extension of the beam search strategy that allows for generating a more diverse
 set of beam sequences to choose from. To learn how it works, refer to [Diverse Beam Search: Decoding Diverse Solutions from Neural Sequence Models](https://arxiv.org/pdf/1610.02424.pdf).
-This approach has two main parameters: `num_beams` and `num_beam_groups`.
-The groups are selected to ensure they are distinct enough compared to the others, and regular beam search is used within each group.
+This approach has three main parameters: `num_beams`, `num_beam_groups`, and `diversity_penalty`.
+The diversity penalty ensures the outputs are distinct across groups, and beam search is used within each group.
+
 
 ```python
 >>> from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 >>> checkpoint = "google/pegasus-xsum"
->>> prompt = "The Permaculture Design Principles are a set of universal design principles \
->>> that can be applied to any location, climate and culture, and they allow us to design \
->>> the most efficient and sustainable human habitation and food production systems. \
->>> Permaculture is a design system that encompasses a wide variety of disciplines, such \
->>> as ecology, landscape design, environmental science and energy conservation, and the \
->>> Permaculture design principles are drawn from these various disciplines. Each individual \
->>> design principle itself embodies a complete conceptual framework based on sound \
->>> scientific principles. When we bring all these separate  principles together, we can \
->>> create a design system that both looks at whole systems, the parts that these systems \
->>> consist of, and how those parts interact with each other to create a complex, dynamic, \
->>> living system. Each design principle serves as a tool that allows us to integrate all \
->>> the separate parts of a design, referred to as elements, into a functional, synergistic, \
->>> whole system, where the elements harmoniously interact and work together in the most \
->>> efficient way possible."
+>>> prompt = (
+...     "The Permaculture Design Principles are a set of universal design principles "
+...     "that can be applied to any location, climate and culture, and they allow us to design "
+...     "the most efficient and sustainable human habitation and food production systems. "
+...     "Permaculture is a design system that encompasses a wide variety of disciplines, such "
+...     "as ecology, landscape design, environmental science and energy conservation, and the "
+...     "Permaculture design principles are drawn from these various disciplines. Each individual "
+...     "design principle itself embodies a complete conceptual framework based on sound "
+...     "scientific principles. When we bring all these separate  principles together, we can "
+...     "create a design system that both looks at whole systems, the parts that these systems "
+...     "consist of, and how those parts interact with each other to create a complex, dynamic, "
+...     "living system. Each design principle serves as a tool that allows us to integrate all "
+...     "the separate parts of a design, referred to as elements, into a functional, synergistic, "
+...     "whole system, where the elements harmoniously interact and work together in the most "
+...     "efficient way possible."
+... )
 
 >>> tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 >>> inputs = tokenizer(prompt, return_tensors="pt")
 
 >>> model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint)
 
->>> outputs = model.generate(**inputs, num_beams=5, num_beam_groups=5, max_new_tokens=30)
+>>> outputs = model.generate(**inputs, num_beams=5, num_beam_groups=5, max_new_tokens=30, diversity_penalty=1.0)
 >>> tokenizer.decode(outputs[0], skip_special_tokens=True)
-'The Design Principles are a set of universal design principles that can be applied to any location, climate and culture, and they allow us to design the most efficient and sustainable human habitation and food production systems.'
+'The Design Principles are a set of universal design principles that can be applied to any location, climate and
+culture, and they allow us to design the'
 ```
 
 This guide illustrates the main parameters that enable various decoding strategies. More advanced parameters exist for the
 [`generate`] method, which gives you even further control over the [`generate`] method's behavior.
 For the complete list of the available parameters, refer to the [API documentation](./main_classes/text_generation.md).
 
-### Assisted Decoding
+### Speculative Decoding
 
-Assisted decoding is a modification of the decoding strategies above that uses an assistant model with the same
-tokenizer (ideally a much smaller model) to greedily generate a few candidate tokens. The main model then validates
-the candidate tokens in a single forward pass, which speeds up the decoding process. Currently, only greedy search
-and sampling are supported with assisted decoding, and doesn't support batched inputs. To learn more about assisted
-decoding, check [this blog post](https://huggingface.co/blog/assisted-generation).
+Speculative decoding (also known as assisted decoding) is a modification of the decoding strategies above, that uses an
+assistant model (ideally a much smaller one) with the same tokenizer, to generate a few candidate tokens. The main
+model then validates the candidate tokens in a single forward pass, which speeds up the decoding process. If
+`do_sample=True`, then the token validation with resampling introduced in the
+[speculative decoding paper](https://arxiv.org/pdf/2211.17192.pdf) is used.
+
+Currently, only greedy search and sampling are supported with assisted decoding, and assisted decoding doesn't support batched inputs.
+To learn more about assisted decoding, check [this blog post](https://huggingface.co/blog/assisted-generation).
 
 To enable assisted decoding, set the `assistant_model` argument with a model.
 
@@ -364,11 +461,12 @@ To enable assisted decoding, set the `assistant_model` argument with a model.
 ['Alice and Bob are sitting in a bar. Alice is drinking a beer and Bob is drinking a']
 ```
 
-When using assisted decoding with sampling methods, you can use the `temperarure` argument to control the randomness
-just like in multinomial sampling. However, in assisted decoding, reducing the temperature will help improving latency.
+When using assisted decoding with sampling methods, you can use the `temperature` argument to control the randomness,
+just like in multinomial sampling. However, in assisted decoding, reducing the temperature may help improve the latency.
 
 ```python
->>> from transformers import AutoModelForCausalLM, AutoTokenizer
+>>> from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+>>> set_seed(42)  # For reproducibility
 
 >>> prompt = "Alice and Bob"
 >>> checkpoint = "EleutherAI/pythia-1.4b-deduped"
@@ -381,5 +479,8 @@ just like in multinomial sampling. However, in assisted decoding, reducing the t
 >>> assistant_model = AutoModelForCausalLM.from_pretrained(assistant_checkpoint)
 >>> outputs = model.generate(**inputs, assistant_model=assistant_model, do_sample=True, temperature=0.5)
 >>> tokenizer.batch_decode(outputs, skip_special_tokens=True)
-["Alice and Bob are sitting on the sofa. Alice says, 'I'm going to my room"]
+['Alice and Bob, a couple of friends of mine, who are both in the same office as']
 ```
+
+Alternativelly, you can also set the `prompt_lookup_num_tokens` to trigger n-gram based assisted decoding, as opposed
+to model based assisted decoding. You can read more about it [here](https://twitter.com/joao_gante/status/1747322413006643259).

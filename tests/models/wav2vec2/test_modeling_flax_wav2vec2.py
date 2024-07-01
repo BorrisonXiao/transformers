@@ -72,7 +72,7 @@ def _test_wav2vec2_with_lm_invalid_pool(in_queue, out_queue, timeout):
     try:
         _ = in_queue.get(timeout=timeout)
 
-        ds = load_dataset("common_voice", "es", split="test", streaming=True)
+        ds = load_dataset("legacy-datasets/common_voice", "es", split="test", streaming=True, trust_remote_code=True)
         sample = next(iter(ds))
 
         resampled_audio = librosa.resample(sample["audio"]["array"], 48_000, 16_000)
@@ -123,7 +123,7 @@ class FlaxWav2Vec2ModelTester:
         conv_bias=False,
         num_conv_pos_embeddings=16,
         num_conv_pos_embedding_groups=2,
-        num_hidden_layers=4,
+        num_hidden_layers=2,
         num_attention_heads=2,
         hidden_dropout_prob=0.1,  # this is most likely not correctly set yet
         intermediate_size=20,
@@ -464,7 +464,7 @@ class FlaxWav2Vec2UtilsTest(unittest.TestCase):
         negative_indices = _sample_negative_indices(features.shape, num_negatives, attention_mask=attention_mask)
 
         # make sure that no padding tokens are sampled
-        self.assertTrue(all([idx not in negative_indices for idx in forbidden_indices]))
+        self.assertTrue(all(idx not in negative_indices for idx in forbidden_indices))
 
         features = features.reshape(-1, hidden_size)  # BTC => (BxT)C
         # take negative vectors from sampled indices
@@ -489,7 +489,9 @@ class FlaxWav2Vec2UtilsTest(unittest.TestCase):
 @slow
 class FlaxWav2Vec2ModelIntegrationTest(unittest.TestCase):
     def _load_datasamples(self, num_samples):
-        ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+        ds = load_dataset(
+            "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True
+        )
         # automatic decoding with librispeech
         speech_samples = ds.sort("id").filter(
             lambda x: x["id"] in [f"1272-141231-000{i}" for i in range(num_samples)]
@@ -585,7 +587,7 @@ class FlaxWav2Vec2ModelIntegrationTest(unittest.TestCase):
     @require_pyctcdecode
     @require_librosa
     def test_wav2vec2_with_lm(self):
-        ds = load_dataset("common_voice", "es", split="test", streaming=True)
+        ds = load_dataset("legacy-datasets/common_voice", "es", split="test", streaming=True, trust_remote_code=True)
         sample = next(iter(ds))
 
         resampled_audio = librosa.resample(sample["audio"]["array"], 48_000, 16_000)
@@ -604,7 +606,7 @@ class FlaxWav2Vec2ModelIntegrationTest(unittest.TestCase):
     @require_pyctcdecode
     @require_librosa
     def test_wav2vec2_with_lm_pool(self):
-        ds = load_dataset("common_voice", "es", split="test", streaming=True)
+        ds = load_dataset("legacy-datasets/common_voice", "es", split="test", streaming=True, trust_remote_code=True)
         sample = next(iter(ds))
 
         resampled_audio = librosa.resample(sample["audio"]["array"], 48_000, 16_000)

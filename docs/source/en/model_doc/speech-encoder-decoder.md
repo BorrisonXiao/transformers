@@ -52,7 +52,7 @@ To do so, the `SpeechEncoderDecoderModel` class provides a [`SpeechEncoderDecode
 >>> from transformers import SpeechEncoderDecoderModel
 
 >>> model = SpeechEncoderDecoderModel.from_encoder_decoder_pretrained(
-...     "facebook/hubert-large-ll60k", "bert-base-uncased"
+...     "facebook/hubert-large-ll60k", "google-bert/bert-base-uncased"
 ... )
 ```
 
@@ -93,7 +93,7 @@ speech inputs) and `labels` (which are the `input_ids` of the encoded target seq
 >>> from datasets import load_dataset
 
 >>> encoder_id = "facebook/wav2vec2-base-960h"  # acoustic model encoder
->>> decoder_id = "bert-base-uncased"  # text decoder
+>>> decoder_id = "google-bert/bert-base-uncased"  # text decoder
 
 >>> feature_extractor = AutoFeatureExtractor.from_pretrained(encoder_id)
 >>> tokenizer = AutoTokenizer.from_pretrained(decoder_id)
@@ -111,7 +111,7 @@ speech inputs) and `labels` (which are the `input_ids` of the encoded target seq
 >>> labels = tokenizer(ds[0]["text"], return_tensors="pt").input_ids
 
 >>> # the forward function automatically creates the correct decoder_input_ids
->>> loss = model(**input_features).loss
+>>> loss = model(input_values=input_values, labels=labels).loss
 >>> loss.backward()
 ```
 

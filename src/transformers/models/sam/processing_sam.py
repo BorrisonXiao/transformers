@@ -15,6 +15,7 @@
 """
 Processor class for SAM.
 """
+
 from copy import deepcopy
 from typing import Optional, Union
 
@@ -44,6 +45,7 @@ class SamProcessor(ProcessorMixin):
         image_processor (`SamImageProcessor`):
             An instance of [`SamImageProcessor`]. The image processor is a required input.
     """
+
     attributes = ["image_processor"]
     image_processor_class = "SamImageProcessor"
 
@@ -56,6 +58,7 @@ class SamProcessor(ProcessorMixin):
     def __call__(
         self,
         images=None,
+        segmentation_maps=None,
         input_points=None,
         input_labels=None,
         input_boxes=None,
@@ -68,6 +71,7 @@ class SamProcessor(ProcessorMixin):
         """
         encoding_image_processor = self.image_processor(
             images,
+            segmentation_maps=segmentation_maps,
             return_tensors=return_tensors,
             **kwargs,
         )
@@ -115,7 +119,7 @@ class SamProcessor(ProcessorMixin):
                     for point, original_size in zip(input_points, original_sizes)
                 ]
             # check that all arrays have the same shape
-            if not all([point.shape == input_points[0].shape for point in input_points]):
+            if not all(point.shape == input_points[0].shape for point in input_points):
                 if input_labels is not None:
                     input_points, input_labels = self._pad_points_and_labels(input_points, input_labels)
 

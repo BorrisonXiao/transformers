@@ -30,7 +30,6 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers.models.openai.modeling_tf_openai import (
-        TF_OPENAI_GPT_PRETRAINED_MODEL_ARCHIVE_LIST,
         TFOpenAIGPTDoubleHeadsModel,
         TFOpenAIGPTForSequenceClassification,
         TFOpenAIGPTLMHeadModel,
@@ -53,7 +52,7 @@ class TFOpenAIGPTModelTester:
         self.use_mc_token_ids = True
         self.vocab_size = 99
         self.hidden_size = 32
-        self.num_hidden_layers = 5
+        self.num_hidden_layers = 2
         self.num_attention_heads = 4
         self.intermediate_size = 37
         self.hidden_act = "gelu"
@@ -253,16 +252,16 @@ class TFOpenAIGPTModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Tes
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_OPENAI_GPT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFOpenAIGPTModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "openai-community/openai-gpt"
+        model = TFOpenAIGPTModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @require_tf
 class TFOPENAIGPTModelLanguageGenerationTest(unittest.TestCase):
     @slow
     def test_lm_generate_openai_gpt(self):
-        model = TFOpenAIGPTLMHeadModel.from_pretrained("openai-gpt")
+        model = TFOpenAIGPTLMHeadModel.from_pretrained("openai-community/openai-gpt")
         input_ids = tf.convert_to_tensor([[481, 4735, 544]], dtype=tf.int32)  # the president is
         expected_output_ids = [
             481,

@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch ResNet model."""
+"""PyTorch ResNet model."""
 
 from typing import Optional
 
@@ -52,11 +52,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 2048, 7, 7]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "microsoft/resnet-50"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tiger cat"
-
-RESNET_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "microsoft/resnet-50",
-    # See all resnet models at https://huggingface.co/models?filter=resnet
-]
 
 
 class ResNetConvLayer(nn.Module):
@@ -149,11 +144,18 @@ class ResNetBottleNeckLayer(nn.Module):
     A classic ResNet's bottleneck layer composed by three `3x3` convolutions.
 
     The first `1x1` convolution reduces the input by a factor of `reduction` in order to make the second `3x3`
-    convolution faster. The last `1x1` convolution remaps the reduced features to `out_channels`.
+    convolution faster. The last `1x1` convolution remaps the reduced features to `out_channels`. If
+    `downsample_in_bottleneck` is true, downsample will be in the first layer instead of the second layer.
     """
 
     def __init__(
-        self, in_channels: int, out_channels: int, stride: int = 1, activation: str = "relu", reduction: int = 4
+        self,
+        in_channels: int,
+        out_channels: int,
+        stride: int = 1,
+        activation: str = "relu",
+        reduction: int = 4,
+        downsample_in_bottleneck: bool = False,
     ):
         super().__init__()
         should_apply_shortcut = in_channels != out_channels or stride != 1
@@ -162,8 +164,10 @@ class ResNetBottleNeckLayer(nn.Module):
             ResNetShortCut(in_channels, out_channels, stride=stride) if should_apply_shortcut else nn.Identity()
         )
         self.layer = nn.Sequential(
-            ResNetConvLayer(in_channels, reduces_channels, kernel_size=1),
-            ResNetConvLayer(reduces_channels, reduces_channels, stride=stride),
+            ResNetConvLayer(
+                in_channels, reduces_channels, kernel_size=1, stride=stride if downsample_in_bottleneck else 1
+            ),
+            ResNetConvLayer(reduces_channels, reduces_channels, stride=stride if not downsample_in_bottleneck else 1),
             ResNetConvLayer(reduces_channels, out_channels, kernel_size=1, activation=None),
         )
         self.activation = ACT2FN[activation]
@@ -194,10 +198,18 @@ class ResNetStage(nn.Module):
 
         layer = ResNetBottleNeckLayer if config.layer_type == "bottleneck" else ResNetBasicLayer
 
+        if config.layer_type == "bottleneck":
+            first_layer = layer(
+                in_channels,
+                out_channels,
+                stride=stride,
+                activation=config.hidden_act,
+                downsample_in_bottleneck=config.downsample_in_bottleneck,
+            )
+        else:
+            first_layer = layer(in_channels, out_channels, stride=stride, activation=config.hidden_act)
         self.layers = nn.Sequential(
-            # downsampling is done in the first layer with stride of 2
-            layer(in_channels, out_channels, stride=stride, activation=config.hidden_act),
-            *[layer(out_channels, out_channels, activation=config.hidden_act) for _ in range(depth - 1)],
+            first_layer, *[layer(out_channels, out_channels, activation=config.hidden_act) for _ in range(depth - 1)]
         )
 
     def forward(self, input: Tensor) -> Tensor:
@@ -257,7 +269,7 @@ class ResNetPreTrainedModel(PreTrainedModel):
     config_class = ResNetConfig
     base_model_prefix = "resnet"
     main_input_name = "pixel_values"
-    supports_gradient_checkpointing = True
+    _no_split_modules = ["ResNetConvLayer", "ResNetShortCut"]
 
     def _init_weights(self, module):
         if isinstance(module, nn.Conv2d):
@@ -265,10 +277,6 @@ class ResNetPreTrainedModel(PreTrainedModel):
         elif isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
             nn.init.constant_(module.weight, 1)
             nn.init.constant_(module.bias, 0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, ResNetEncoder):
-            module.gradient_checkpointing = value
 
 
 RESNET_START_DOCSTRING = r"""

@@ -14,14 +14,17 @@
 # limitations under the License.
 
 import copy
+import os
 import tempfile
 import unittest
+import warnings
 
 from huggingface_hub import HfFolder, delete_repo
 from parameterized import parameterized
 from requests.exceptions import HTTPError
 
 from transformers import AutoConfig, GenerationConfig
+from transformers.generation import GenerationMode
 from transformers.testing_utils import TOKEN, USER, is_staging_test
 
 
@@ -50,7 +53,7 @@ class GenerationConfigTest(unittest.TestCase):
         self.assertEqual(loaded_config.max_time, None)
 
     def test_from_model_config(self):
-        model_config = AutoConfig.from_pretrained("gpt2")
+        model_config = AutoConfig.from_pretrained("openai-community/gpt2")
         generation_config_from_model = GenerationConfig.from_model_config(model_config)
         default_generation_config = GenerationConfig()
 
@@ -118,6 +121,105 @@ class GenerationConfigTest(unittest.TestCase):
         self.assertEqual(loaded_config.do_sample, True)
         self.assertEqual(loaded_config.num_beams, 1)  # default value
 
+    def test_validate(self):
+        """
+        Tests that the `validate` method is working as expected. Note that `validate` is called at initialization time
+        """
+        # A correct configuration will not throw any warning
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            GenerationConfig()
+        self.assertEqual(len(captured_warnings), 0)
+
+        # Inconsequent but technically wrong configuration will throw a warning (e.g. setting sampling
+        # parameters with `do_sample=False`). May be escalated to an error in the future.
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            GenerationConfig(do_sample=False, temperature=0.5)
+        self.assertEqual(len(captured_warnings), 1)
+
+        # Expanding on the case above, we can update a bad configuration to get rid of the warning. Ideally,
+        # that is done by unsetting the parameter (i.e. setting it to None)
+        generation_config_bad_temperature = GenerationConfig(do_sample=False, temperature=0.5)
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            # BAD - 0.9 means it is still set, we should warn
+            generation_config_bad_temperature.update(temperature=0.9)
+        self.assertEqual(len(captured_warnings), 1)
+        generation_config_bad_temperature = GenerationConfig(do_sample=False, temperature=0.5)
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            # CORNER CASE - 1.0 is the default, we can't detect whether it is set by the user or not, we shouldn't warn
+            generation_config_bad_temperature.update(temperature=1.0)
+        self.assertEqual(len(captured_warnings), 0)
+        generation_config_bad_temperature = GenerationConfig(do_sample=False, temperature=0.5)
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            # OK - None means it is unset, nothing to warn about
+            generation_config_bad_temperature.update(temperature=None)
+        self.assertEqual(len(captured_warnings), 0)
+
+        # Impossible sets of contraints/parameters will raise an exception
+        with self.assertRaises(ValueError):
+            GenerationConfig(do_sample=False, num_beams=1, num_return_sequences=2)
+        with self.assertRaises(ValueError):
+            # dummy constraint
+            GenerationConfig(do_sample=True, num_beams=2, constraints=["dummy"])
+        with self.assertRaises(ValueError):
+            GenerationConfig(do_sample=True, num_beams=2, force_words_ids=[[[1, 2, 3]]])
+
+        # Passing `generate()`-only flags to `validate` will raise an exception
+        with self.assertRaises(ValueError):
+            GenerationConfig(logits_processor="foo")
+
+        # Model-specific parameters will NOT raise an exception or a warning
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            GenerationConfig(foo="bar")
+        self.assertEqual(len(captured_warnings), 0)
+
+    def test_refuse_to_save(self):
+        """Tests that we refuse to save a generation config that fails validation."""
+
+        # setting the temperature alone is invalid, as we also need to set do_sample to True -> throws a warning that
+        # is caught, doesn't save, and raises an exception
+        config = GenerationConfig()
+        config.temperature = 0.5
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(ValueError) as exc:
+                config.save_pretrained(tmp_dir)
+            self.assertTrue("Fix these issues to save the configuration." in str(exc.exception))
+            self.assertTrue(len(os.listdir(tmp_dir)) == 0)
+
+        # greedy decoding throws an exception if we try to return multiple sequences -> throws an exception that is
+        # caught, doesn't save, and raises a warning
+        config = GenerationConfig()
+        config.num_return_sequences = 2
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(ValueError) as exc:
+                config.save_pretrained(tmp_dir)
+            self.assertTrue("Fix these issues to save the configuration." in str(exc.exception))
+            self.assertTrue(len(os.listdir(tmp_dir)) == 0)
+
+        # final check: no warnings/exceptions thrown if it is correct, and file is saved
+        config = GenerationConfig()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with warnings.catch_warnings(record=True) as captured_warnings:
+                config.save_pretrained(tmp_dir)
+            self.assertEqual(len(captured_warnings), 0)
+            self.assertTrue(len(os.listdir(tmp_dir)) == 1)
+
+    def test_generation_mode(self):
+        """Tests that the `get_generation_mode` method is working as expected."""
+        config = GenerationConfig()
+        self.assertEqual(config.get_generation_mode(), GenerationMode.GREEDY_SEARCH)
+
+        config = GenerationConfig(do_sample=True)
+        self.assertEqual(config.get_generation_mode(), GenerationMode.SAMPLE)
+
+        config = GenerationConfig(num_beams=2)
+        self.assertEqual(config.get_generation_mode(), GenerationMode.BEAM_SEARCH)
+
+        config = GenerationConfig(top_k=10, do_sample=False, penalty_alpha=0.6)
+        self.assertEqual(config.get_generation_mode(), GenerationMode.CONTRASTIVE_SEARCH)
+
+        config = GenerationConfig()
+        self.assertEqual(config.get_generation_mode(assistant_model="foo"), GenerationMode.ASSISTED_GENERATION)
+
 
 @is_staging_test
 class ConfigPushToHubTester(unittest.TestCase):
@@ -144,7 +246,7 @@ class ConfigPushToHubTester(unittest.TestCase):
             temperature=0.7,
             length_penalty=1.0,
         )
-        config.push_to_hub("test-generation-config", use_auth_token=self._token)
+        config.push_to_hub("test-generation-config", token=self._token)
 
         new_config = GenerationConfig.from_pretrained(f"{USER}/test-generation-config")
         for k, v in config.to_dict().items():
@@ -156,9 +258,7 @@ class ConfigPushToHubTester(unittest.TestCase):
 
         # Push to hub via save_pretrained
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config.save_pretrained(
-                tmp_dir, repo_id="test-generation-config", push_to_hub=True, use_auth_token=self._token
-            )
+            config.save_pretrained(tmp_dir, repo_id="test-generation-config", push_to_hub=True, token=self._token)
 
         new_config = GenerationConfig.from_pretrained(f"{USER}/test-generation-config")
         for k, v in config.to_dict().items():
@@ -171,7 +271,7 @@ class ConfigPushToHubTester(unittest.TestCase):
             temperature=0.7,
             length_penalty=1.0,
         )
-        config.push_to_hub("valid_org/test-generation-config-org", use_auth_token=self._token)
+        config.push_to_hub("valid_org/test-generation-config-org", token=self._token)
 
         new_config = GenerationConfig.from_pretrained("valid_org/test-generation-config-org")
         for k, v in config.to_dict().items():
@@ -184,7 +284,7 @@ class ConfigPushToHubTester(unittest.TestCase):
         # Push to hub via save_pretrained
         with tempfile.TemporaryDirectory() as tmp_dir:
             config.save_pretrained(
-                tmp_dir, repo_id="valid_org/test-generation-config-org", push_to_hub=True, use_auth_token=self._token
+                tmp_dir, repo_id="valid_org/test-generation-config-org", push_to_hub=True, token=self._token
             )
 
         new_config = GenerationConfig.from_pretrained("valid_org/test-generation-config-org")

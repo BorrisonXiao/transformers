@@ -49,7 +49,7 @@ class ZeroShotImageClassificationPipelineTests(unittest.TestCase):
     #     if tokenizer is None:
     #         # Side effect of no Fast Tokenizer class for these model, so skipping
     #         # But the slow tokenizer test should still run as they're quite small
-    #         self.skipTest("No tokenizer available")
+    #         self.skipTest(reason="No tokenizer available")
     #         return
     #         # return None, None
 
@@ -85,6 +85,7 @@ class ZeroShotImageClassificationPipelineTests(unittest.TestCase):
             [
                 [{"score": 0.333, "label": "a"}, {"score": 0.333, "label": "b"}, {"score": 0.333, "label": "c"}],
                 [{"score": 0.333, "label": "a"}, {"score": 0.333, "label": "c"}, {"score": 0.333, "label": "b"}],
+                [{"score": 0.333, "label": "b"}, {"score": 0.333, "label": "a"}, {"score": 0.333, "label": "c"}],
             ],
         )
 
@@ -237,6 +238,40 @@ class ZeroShotImageClassificationPipelineTests(unittest.TestCase):
                     {"score": 0.485, "label": "cat"},
                     {"score": 0.004, "label": "plane"},
                 ],
+            ]
+            * 5,
+        )
+
+    @slow
+    @require_torch
+    def test_siglip_model_pt(self):
+        image_classifier = pipeline(
+            task="zero-shot-image-classification",
+            model="google/siglip-base-patch16-224",
+        )
+        # This is an image of 2 cats with remotes and no planes
+        image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
+        output = image_classifier(image, candidate_labels=["2 cats", "a plane", "a remote"])
+
+        self.assertEqual(
+            nested_simplify(output),
+            [
+                {"score": 0.198, "label": "2 cats"},
+                {"score": 0.0, "label": "a remote"},
+                {"score": 0.0, "label": "a plane"},
+            ],
+        )
+
+        output = image_classifier([image] * 5, candidate_labels=["2 cats", "a plane", "a remote"], batch_size=2)
+
+        self.assertEqual(
+            nested_simplify(output),
+            [
+                [
+                    {"score": 0.198, "label": "2 cats"},
+                    {"score": 0.0, "label": "a remote"},
+                    {"score": 0.0, "label": "a plane"},
+                ]
             ]
             * 5,
         )

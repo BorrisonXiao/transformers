@@ -30,33 +30,44 @@ Take a look at the [`pipeline`] documentation for a complete list of supported t
 
 ## Pipeline usage
 
-While each task has an associated [`pipeline`], it is simpler to use the general [`pipeline`] abstraction which contains all the task-specific pipelines. The [`pipeline`] automatically loads a default model and a preprocessing class capable of inference for your task.
+While each task has an associated [`pipeline`], it is simpler to use the general [`pipeline`] abstraction which contains 
+all the task-specific pipelines. The [`pipeline`] automatically loads a default model and a preprocessing class capable 
+of inference for your task. Let's take the example of using the [`pipeline`] for automatic speech recognition (ASR), or
+speech-to-text.
 
-1. Start by creating a [`pipeline`] and specify an inference task:
+
+1. Start by creating a [`pipeline`] and specify the inference task:
 
 ```py
 >>> from transformers import pipeline
 
->>> generator = pipeline(task="automatic-speech-recognition")
+>>> transcriber = pipeline(task="automatic-speech-recognition")
 ```
 
-2. Pass your input text to the [`pipeline`]:
+2. Pass your input to the [`pipeline`]. In the case of speech recognition, this is an audio input file:
 
 ```py
->>> generator("https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac")
+>>> transcriber("https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac")
 {'text': 'I HAVE A DREAM BUT ONE DAY THIS NATION WILL RISE UP LIVE UP THE TRUE MEANING OF ITS TREES'}
 ```
 
-Not the result you had in mind? Check out some of the [most downloaded automatic speech recognition models](https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads) on the Hub to see if you can get a better transcription.
-Let's try [openai/whisper-large](https://huggingface.co/openai/whisper-large):
+Not the result you had in mind? Check out some of the [most downloaded automatic speech recognition models](https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=trending) 
+on the Hub to see if you can get a better transcription.
+
+Let's try the [Whisper large-v2](https://huggingface.co/openai/whisper-large) model from OpenAI. Whisper was released 
+2 years later than Wav2Vec2, and was trained on close to 10x more data. As such, it beats Wav2Vec2 on most downstream 
+benchmarks. It also has the added benefit of predicting punctuation and casing, neither of which are possible with  
+Wav2Vec2.
+
+Let's give it a try here to see how it performs:
 
 ```py
->>> generator = pipeline(model="openai/whisper-large")
->>> generator("https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac")
+>>> transcriber = pipeline(model="openai/whisper-large-v2")
+>>> transcriber("https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac")
 {'text': ' I have a dream that one day this nation will rise up and live out the true meaning of its creed.'}
 ```
 
-Now this result looks more accurate!
+Now this result looks more accurate! For a deep-dive comparison on Wav2Vec2 vs Whisper, refer to the [Audio Transformers Course](https://huggingface.co/learn/audio-course/chapter5/asr_models).
 We really encourage you to check out the Hub for models in different languages, models specialized in your field, and more.
 You can check out and compare model results directly from your browser on the Hub to see if it fits or 
 handles corner cases better than other ones.
@@ -65,7 +76,7 @@ And if you don't find a model for your use case, you can always start [training]
 If you have several inputs, you can pass your input as a list:
 
 ```py
-generator(
+transcriber(
     [
         "https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac",
         "https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/1.flac",
@@ -73,22 +84,22 @@ generator(
 )
 ```
 
-If you want to iterate over a whole dataset, or want to use it for inference in a webserver, check out dedicated parts
-
-[Using pipelines on a dataset](#using-pipelines-on-a-dataset)
-
-[Using pipelines for a webserver](./pipeline_webserver)
+Pipelines are great for experimentation as switching from one model to another is trivial; however, there are some ways to optimize them for larger workloads than experimentation. See the following guides that dive into iterating over whole datasets or using pipelines in a webserver:
+of the docs:
+* [Using pipelines on a dataset](#using-pipelines-on-a-dataset)
+* [Using pipelines for a webserver](./pipeline_webserver)
 
 ## Parameters
 
 [`pipeline`] supports many parameters; some are task specific, and some are general to all pipelines.
-In general you can specify parameters anywhere you want:
+In general, you can specify parameters anywhere you want:
 
 ```py
-generator = pipeline(model="openai/whisper-large", my_parameter=1)
-out = generator(...)  # This will use `my_parameter=1`.
-out = generator(..., my_parameter=2)  # This will override and use `my_parameter=2`.
-out = generator(...)  # This will go back to using `my_parameter=1`.
+transcriber = pipeline(model="openai/whisper-large-v2", my_parameter=1)
+
+out = transcriber(...)  # This will use `my_parameter=1`.
+out = transcriber(..., my_parameter=2)  # This will override and use `my_parameter=2`.
+out = transcriber(...)  # This will go back to using `my_parameter=1`.
 ```
 
 Let's check out 3 important ones:
@@ -99,14 +110,21 @@ If you use `device=n`, the pipeline automatically puts the model on the specifie
 This will work regardless of whether you are using PyTorch or Tensorflow.
 
 ```py
-generator = pipeline(model="openai/whisper-large", device=0)
+transcriber = pipeline(model="openai/whisper-large-v2", device=0)
 ```
 
-If the model is too large for a single GPU, you can set `device_map="auto"` to allow 🤗 [Accelerate](https://huggingface.co/docs/accelerate) to automatically determine how to load and store the model weights.
+If the model is too large for a single GPU and you are using PyTorch, you can set `device_map="auto"` to automatically 
+determine how to load and store the model weights. Using the `device_map` argument requires the 🤗 [Accelerate](https://huggingface.co/docs/accelerate)
+package:
+
+```bash
+pip install --upgrade accelerate
+```
+
+The following code automatically loads and stores model weights across devices:
 
 ```py
-#!pip install accelerate
-generator = pipeline(model="openai/whisper-large", device_map="auto")
+transcriber = pipeline(model="openai/whisper-large-v2", device_map="auto")
 ```
 
 Note that if  `device_map="auto"` is passed, there is no need to add the argument `device=device` when instantiating your `pipeline` as you may encounter some unexpected behavior!
@@ -118,12 +136,12 @@ By default, pipelines will not batch inference for reasons explained in detail [
 But if it works in your use case, you can use:
 
 ```py
-generator = pipeline(model="openai/whisper-large", device=0, batch_size=2)
-audio_filenames = [f"audio_{i}.flac" for i in range(10)]
-texts = generator(audio_filenames)
+transcriber = pipeline(model="openai/whisper-large-v2", device=0, batch_size=2)
+audio_filenames = [f"https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/{i}.flac" for i in range(1, 5)]
+texts = transcriber(audio_filenames)
 ```
 
-This runs the pipeline on the 10 provided audio files, but it will pass them in batches of 2
+This runs the pipeline on the 4 provided audio files, but it will pass them in batches of 2
 to the model (which is on a GPU, where batching is more likely to help) without requiring any further code from you. 
 The output should always match what you would have received without batching. It is only meant as a way to help you get more speed out of a pipeline.
 
@@ -136,18 +154,23 @@ For instance, the [`transformers.AutomaticSpeechRecognitionPipeline.__call__`] m
 
 
 ```py
->>> # Not using whisper, as it cannot provide timestamps.
->>> generator = pipeline(model="facebook/wav2vec2-large-960h-lv60-self", return_timestamps="word")
->>> generator("https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac")
-{'text': 'I HAVE A DREAM BUT ONE DAY THIS NATION WILL RISE UP AND LIVE OUT THE TRUE MEANING OF ITS CREED', 'chunks': [{'text': 'I', 'timestamp': (1.22, 1.24)}, {'text': 'HAVE', 'timestamp': (1.42, 1.58)}, {'text': 'A', 'timestamp': (1.66, 1.68)}, {'text': 'DREAM', 'timestamp': (1.76, 2.14)}, {'text': 'BUT', 'timestamp': (3.68, 3.8)}, {'text': 'ONE', 'timestamp': (3.94, 4.06)}, {'text': 'DAY', 'timestamp': (4.16, 4.3)}, {'text': 'THIS', 'timestamp': (6.36, 6.54)}, {'text': 'NATION', 'timestamp': (6.68, 7.1)}, {'text': 'WILL', 'timestamp': (7.32, 7.56)}, {'text': 'RISE', 'timestamp': (7.8, 8.26)}, {'text': 'UP', 'timestamp': (8.38, 8.48)}, {'text': 'AND', 'timestamp': (10.08, 10.18)}, {'text': 'LIVE', 'timestamp': (10.26, 10.48)}, {'text': 'OUT', 'timestamp': (10.58, 10.7)}, {'text': 'THE', 'timestamp': (10.82, 10.9)}, {'text': 'TRUE', 'timestamp': (10.98, 11.18)}, {'text': 'MEANING', 'timestamp': (11.26, 11.58)}, {'text': 'OF', 'timestamp': (11.66, 11.7)}, {'text': 'ITS', 'timestamp': (11.76, 11.88)}, {'text': 'CREED', 'timestamp': (12.0, 12.38)}]}
+>>> transcriber = pipeline(model="openai/whisper-large-v2", return_timestamps=True)
+>>> transcriber("https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac")
+{'text': ' I have a dream that one day this nation will rise up and live out the true meaning of its creed.', 'chunks': [{'timestamp': (0.0, 11.88), 'text': ' I have a dream that one day this nation will rise up and live out the true meaning of its'}, {'timestamp': (11.88, 12.38), 'text': ' creed.'}]}
 ```
 
-As you can see, the model inferred the text and also outputted **when** the various words were pronounced
-in the sentence.
+As you can see, the model inferred the text and also outputted **when** the various sentences were pronounced.
 
 There are many parameters available for each task, so check out each task's API reference to see what you can tinker with!
-For instance, the [`~transformers.AutomaticSpeechRecognitionPipeline`] has a `chunk_length_s` parameter which is helpful for working on really long audio files (for example, subtitling entire movies or hour-long videos) that a model typically cannot handle on its own.
+For instance, the [`~transformers.AutomaticSpeechRecognitionPipeline`] has a `chunk_length_s` parameter which is helpful 
+for working on really long audio files (for example, subtitling entire movies or hour-long videos) that a model typically 
+cannot handle on its own:
 
+```python
+>>> transcriber = pipeline(model="openai/whisper-large-v2", chunk_length_s=30)
+>>> transcriber("https://huggingface.co/datasets/reach-vb/random-audios/resolve/main/ted_60.wav")
+{'text': " So in college, I was a government major, which means I had to write a lot of papers. Now, when a normal student writes a paper, they might spread the work out a little like this. So, you know. You get started maybe a little slowly, but you get enough done in the first week that with some heavier days later on, everything gets done and things stay civil. And I would want to do that like that. That would be the plan. I would have it all ready to go, but then actually the paper would come along, and then I would kind of do this. And that would happen every single paper. But then came my 90-page senior thesis, a paper you're supposed to spend a year on. I knew for a paper like that, my normal workflow was not an option, it was way too big a project. So I planned things out and I decided I kind of had to go something like this. This is how the year would go. So I'd start off light and I'd bump it up"}
+```
 
 If you can't find a parameter that would really help you out, feel free to [request it](https://github.com/huggingface/transformers/issues/new?assignees=&labels=feature&template=feature-request.yml)!
 
@@ -162,7 +185,7 @@ def data():
         yield f"My example {i}"
 
 
-pipe = pipeline(model="gpt2", device=0)
+pipe = pipeline(model="openai-community/gpt2", device=0)
 generated_characters = 0
 for out in pipe(data()):
     generated_characters += len(out[0]["generated_text"])
@@ -204,7 +227,7 @@ page.
 
 Using a [`pipeline`] for vision tasks is practically identical.
 
-Specify your task and pass your image to the classifier. The image can be a link or a local path to the image. For example, what species of cat is shown below?
+Specify your task and pass your image to the classifier. The image can be a link, a local path or a base64-encoded image. For example, what species of cat is shown below?
 
 ![pipeline-cat-chonk](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/pipeline-cat-chonk.jpeg)
 
@@ -247,11 +270,13 @@ For example, if you use this [invoice image](https://huggingface.co/spaces/impir
 >>> from transformers import pipeline
 
 >>> vqa = pipeline(model="impira/layoutlm-document-qa")
->>> vqa(
+>>> output = vqa(
 ...     image="https://huggingface.co/spaces/impira/docquery/resolve/2359223c1837a7587402bda0f2643382a6eefeab/invoice.png",
 ...     question="What is the invoice number?",
 ... )
-[{'score': 0.42515, 'answer': 'us-001', 'start': 16, 'end': 16}]
+>>> output[0]["score"] = round(output[0]["score"], 3)
+>>> output
+[{'score': 0.425, 'answer': 'us-001', 'start': 16, 'end': 16}]
 ```
 
 <Tip>
@@ -291,4 +316,30 @@ pipe = pipeline(model="facebook/opt-1.3b", device_map="auto", model_kwargs={"loa
 output = pipe("This is a cool example!", do_sample=True, top_p=0.95)
 ```
 
-Note that you can replace the checkpoint with any of the Hugging Face model that supports large model loading such as BLOOM!
+Note that you can replace the checkpoint with any Hugging Face model that supports large model loading, such as BLOOM.
+
+## Creating web demos from pipelines with `gradio`
+
+Pipelines are automatically supported in [Gradio](https://github.com/gradio-app/gradio/), a library that makes creating beautiful and user-friendly machine learning apps on the web a breeze. First, make sure you have Gradio installed:
+
+```
+pip install gradio
+```
+
+Then, you can create a web demo around an image classification pipeline (or any other pipeline) in a single line of code by calling Gradio's [`Interface.from_pipeline`](https://www.gradio.app/docs/interface#interface-from-pipeline) function to launch the pipeline. This creates an intuitive drag-and-drop interface in your browser:
+
+```py
+from transformers import pipeline
+import gradio as gr
+
+pipe = pipeline("image-classification", model="google/vit-base-patch16-224")
+
+gr.Interface.from_pipeline(pipe).launch()
+```
+
+
+![](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/panda-classification.png)
+
+By default, the web demo runs on a local server. If you'd like to share it with others, you can generate a temporary public
+link by setting `share=True` in `launch()`. You can also host your demo on [Hugging Face Spaces](https://huggingface.co/spaces) for a permanent link. 
+

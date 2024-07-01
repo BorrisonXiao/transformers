@@ -12,9 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND=, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" BridgeTower model configuration"""
+"""BridgeTower model configuration"""
 
-import copy
 import os
 from typing import Union
 
@@ -23,13 +22,6 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-BRIDGETOWER_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "BridgeTower/bridgetower-base": "https://huggingface.co/BridgeTower/bridgetower-base/blob/main/config.json",
-    "BridgeTower/bridgetower-base-itm-mlm": (
-        "https://huggingface.co/BridgeTower/bridgetower-base-itm-mlm/blob/main/config.json"
-    ),
-}
 
 
 class BridgeTowerVisionConfig(PretrainedConfig):
@@ -50,7 +42,7 @@ class BridgeTowerVisionConfig(PretrainedConfig):
             The size (resolution) of each patch.
         image_size (`int`, *optional*, defaults to 288):
             The size (resolution) of each image.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
         layer_norm_eps (`float`, *optional*, defaults to 1e-05):
@@ -74,6 +66,7 @@ class BridgeTowerVisionConfig(PretrainedConfig):
     >>> # Accessing the configuration
     >>> configuration
     ```"""
+
     model_type = "bridgetower_vision_model"
 
     def __init__(
@@ -152,7 +145,7 @@ class BridgeTowerTextConfig(PretrainedConfig):
             just in case (e.g., 512 or 1024 or 2048).
         type_vocab_size (`int`, *optional*, defaults to 2):
             The vocabulary size of the `token_type_ids`.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
         layer_norm_eps (`float`, *optional*, defaults to 1e-05):
@@ -180,6 +173,7 @@ class BridgeTowerTextConfig(PretrainedConfig):
     >>> # Accessing the configuration
     >>> configuration
     ```"""
+
     model_type = "bridgetower_text_model"
 
     def __init__(
@@ -256,7 +250,7 @@ class BridgeTowerConfig(PretrainedConfig):
             The non-linear activation function (function or string) in the encoder and pooler.
         hidden_size (`int`, *optional*, defaults to 768):
             Dimensionality of the encoder layers and the pooler layer.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
         layer_norm_eps (`float`, *optional*, defaults to 1e-05):
@@ -292,6 +286,7 @@ class BridgeTowerConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "bridgetower"
 
     def __init__(
@@ -349,16 +344,3 @@ class BridgeTowerConfig(PretrainedConfig):
         """
 
         return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
-
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
-
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["text_config"] = self.text_config.to_dict()
-        output["vision_config"] = self.vision_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output

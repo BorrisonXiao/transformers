@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" GPT Neo model configuration"""
+"""GPT Neo model configuration"""
 
 from collections import OrderedDict
 from typing import Any, Mapping, Optional
@@ -24,11 +24,6 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-GPT_NEO_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "EleutherAI/gpt-neo-1.3B": "https://huggingface.co/EleutherAI/gpt-neo-1.3B/resolve/main/config.json",
-    # See all GPTNeo models at https://huggingface.co/models?filter=gpt_neo
-}
 
 
 class GPTNeoConfig(PretrainedConfig):
@@ -54,7 +49,7 @@ class GPTNeoConfig(PretrainedConfig):
             Dimensionality of the encoder layers and the pooler layer.
         num_layers (`int`, *optional*, defaults to 24):
             Number of hidden layers in the Transformer encoder.
-        attention_types (`List`, *optional*, defaults to `[[["global", "local"], 12]]`):
+        attention_types (`List`, *optional*, defaults to `[[['global', 'local'], 12]]`):
             The type of attention for each layer in a `List` of the following format `[[["attention_type"],
             num_layerss]]` e.g. for a 24 layer model `[[["global"], 24]]` or `[[["global", "local"], 12]]` Choose the
             value of `attention_type` from `["global", "local"]`
@@ -70,13 +65,13 @@ class GPTNeoConfig(PretrainedConfig):
         resid_dropout (`float`, *optional*, defaults to 0.0):
             Residual dropout used in the attention pattern.
         embed_dropout (`float`, *optional*, defaults to 0.0):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         classifier_dropout (`float`, *optional*, defaults to 0.1):
             Argument used when doing token classification, used in the model [`GPTNeoForTokenClassification`]. The
             dropout ratio for the hidden layer.
-        layer_norm_epsilon (`float`, *optional*, defaults to 1e-5):
+        layer_norm_epsilon (`float`, *optional*, defaults to 1e-05):
             The epsilon used by the layer normalization layers.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
@@ -102,6 +97,7 @@ class GPTNeoConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "gpt_neo"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {"num_attention_heads": "num_heads", "num_hidden_layers": "num_layers"}

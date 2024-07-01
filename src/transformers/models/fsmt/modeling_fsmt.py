@@ -35,7 +35,7 @@ from torch import Tensor, nn
 from torch.nn import CrossEntropyLoss, LayerNorm
 
 from ...activations import ACT2FN
-from ...deepspeed import is_deepspeed_zero3_enabled
+from ...integrations.deepspeed import is_deepspeed_zero3_enabled
 from ...modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPastAndCrossAttentions,
@@ -472,9 +472,7 @@ class FSMTEncoder(nn.Module):
         self.embed_positions = SinusoidalPositionalEmbedding(
             config.max_position_embeddings + self.padding_idx + 1, embed_dim, self.padding_idx
         )
-        self.layers = nn.ModuleList(
-            [EncoderLayer(config) for _ in range(config.encoder_layers)]
-        )  # type: List[EncoderLayer]
+        self.layers = nn.ModuleList([EncoderLayer(config) for _ in range(config.encoder_layers)])  # type: List[EncoderLayer]
 
     def forward(
         self,
@@ -682,9 +680,7 @@ class FSMTDecoder(nn.Module):
         self.embed_positions = SinusoidalPositionalEmbedding(
             config.max_position_embeddings + self.padding_idx + 1, embed_dim, self.padding_idx
         )
-        self.layers = nn.ModuleList(
-            [DecoderLayer(config) for _ in range(config.decoder_layers)]
-        )  # type: List[DecoderLayer]
+        self.layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.decoder_layers)])  # type: List[DecoderLayer]
 
         if is_deepspeed_zero3_enabled():
             import deepspeed
@@ -695,6 +691,9 @@ class FSMTDecoder(nn.Module):
             embed_tokens_weight_shape = self.embed_tokens.weight.shape
         self.output_projection = nn.Linear(embed_tokens_weight_shape[1], embed_tokens_weight_shape[0], bias=False)
         self.output_projection.weight = self.embed_tokens.weight
+
+    def _tie_weights(self):
+        self.embed_tokens.weight = self.output_projection.weight
 
     def forward(
         self,
@@ -770,7 +769,7 @@ class FSMTDecoder(nn.Module):
         x += positions
         x = nn.functional.dropout(x, p=self.dropout, training=self.training)
 
-        # Convert to FSMT output format: (seq_len, BS, model_dim) -> (BS, seq_len, model_dim)
+        # Convert to FSMT output format: (BS, seq_len, model_dim) -> (seq_len, BS, model_dim)
         x = x.transpose(0, 1)
         encoder_hidden_states = encoder_hidden_states.transpose(0, 1)
 
@@ -1034,8 +1033,7 @@ def _get_shape(t):
     FSMT_START_DOCSTRING,
 )
 class FSMTModel(PretrainedFSMTModel):
-    _keys_to_ignore_on_load_missing = ["decoder.output_projection.weight"]
-    _tied_weights_keys = ["decoder.embed_tokens.weight"]
+    _tied_weights_keys = ["decoder.embed_tokens.weight", "decoder.output_projection.weight"]
 
     def __init__(self, config: FSMTConfig):
         super().__init__(config)
@@ -1055,6 +1053,11 @@ class FSMTModel(PretrainedFSMTModel):
 
     def get_decoder(self):
         return self.decoder
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.decoder.embed_tokens, self.get_input_embeddings())
+            self._tie_or_clone_weights(self.decoder.output_projection, self.get_input_embeddings())
 
     @add_start_docstrings_to_model_forward(FSMT_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
@@ -1172,16 +1175,7 @@ class FSMTModel(PretrainedFSMTModel):
 )
 class FSMTForConditionalGeneration(PretrainedFSMTModel):
     base_model_prefix = "model"
-    _keys_to_ignore_on_load_missing = [
-        "model.encoder.embed_positions.weight",
-        "model.decoder.embed_positions.weight",
-        "decoder.output_projection.weight",
-    ]
-    _keys_to_ignore_on_save = [
-        "model.encoder.embed_positions.weight",
-        "model.decoder.embed_positions.weight",
-    ]
-    _tied_weights_keys = ["model.decoder.embed_tokens.weight"]
+    _tied_weights_keys = ["decoder.embed_tokens.weight", "decoder.output_projection.weight"]
 
     def __init__(self, config: FSMTConfig):
         super().__init__(config)
@@ -1355,8 +1349,8 @@ class SinusoidalPositionalEmbedding(nn.Embedding):
         """
         half_dim = embedding_dim // 2
         emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=torch.float) * -emb)
-        emb = torch.arange(num_embeddings, dtype=torch.float).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.int64).float() * -emb)
+        emb = torch.arange(num_embeddings, dtype=torch.int64).float().unsqueeze(1) * emb.unsqueeze(0)
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(num_embeddings, -1)
         if embedding_dim % 2 == 1:
             # zero pad

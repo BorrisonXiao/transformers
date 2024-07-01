@@ -27,7 +27,7 @@ This can be more efficient than a regular Transformer and can deal with sentence
 This model was contributed by [sgugger](https://huggingface.co/sgugger).
 The original code can be found [here](https://github.com/BlinkDL/RWKV-LM).
 
-Example of use as an RNN:
+## Usage example
 
 ```py
 import torch
@@ -51,10 +51,27 @@ output_two = outputs.last_hidden_state
 torch.allclose(torch.cat([output_one, output_two], dim=1), output_whole, atol=1e-5)
 ```
 
+If you want to make sure the model stops generating when `'\n\n'` is detected, we recommend using the following stopping criteria:
+
+```python 
+from transformers import StoppingCriteria
+
+class RwkvStoppingCriteria(StoppingCriteria):
+    def __init__(self, eos_sequence = [187,187], eos_token_id = 537):
+        self.eos_sequence = eos_sequence
+        self.eos_token_id = eos_token_id
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+        last_2_ids = input_ids[:,-2:].tolist()
+        return self.eos_sequence in last_2_ids
+
+
+output = model.generate(inputs["input_ids"], max_new_tokens=64, stopping_criteria = [RwkvStoppingCriteria()])
+```
+
 ## RwkvConfig
 
 [[autodoc]] RwkvConfig
-
 
 ## RwkvModel
 
@@ -72,7 +89,7 @@ In a traditional auto-regressive Transformer, attention is written as
 
 $$O = \hbox{softmax}(QK^{T} / \sqrt{d}) V$$
 
-with \\(Q\\), \\(K\\) and \\(V\\) are matrices of shape `seq_len x hidden_size` named query, key and value (they are actually bigger matrices with a batch dimension and an attention head dimension but we're only interested in the last two, which is where the matrix product is taken, so for the sake of simplicity we only consider those two). The product \\(QK^{T}\\) then has shape `seq_len x seq_len` and we can take the maxtrix product with \\(V\\) to get the output \\(O\\) of the same shape as the others.  
+with \\(Q\\), \\(K\\) and \\(V\\) are matrices of shape `seq_len x hidden_size` named query, key and value (they are actually bigger matrices with a batch dimension and an attention head dimension but we're only interested in the last two, which is where the matrix product is taken, so for the sake of simplicity we only consider those two). The product \\(QK^{T}\\) then has shape `seq_len x seq_len` and we can take the matrix product with \\(V\\) to get the output \\(O\\) of the same shape as the others.  
 
 Replacing the softmax by its value gives:
 
@@ -92,7 +109,7 @@ with \\(u\\) and \\(w\\) learnable parameters called in the code `time_first` an
 
 $$N_{i} = e^{u + K_{i}} V_{i} + \hat{N}_{i} \hbox{  where  } \hat{N}_{i} = e^{K_{i-1}} V_{i-1} + e^{w + K_{i-2}} V_{i-2} \cdots + e^{(i-2)w + K_{1}} V_{1}$$
 
-so \\(\hat{N}_{i}\\) (called `numerator_state` in the code) satistfies
+so \\(\hat{N}_{i}\\) (called `numerator_state` in the code) satisfies
 
 $$\hat{N}_{0} = 0 \hbox{  and  } \hat{N}_{j+1} = e^{K_{j}} V_{j} + e^{w} \hat{N}_{j}$$
 
@@ -100,7 +117,7 @@ and
 
 $$D_{i} = e^{u + K_{i}} + \hat{D}_{i} \hbox{  where  } \hat{D}_{i} = e^{K_{i-1}} + e^{w + K_{i-2}} \cdots + e^{(i-2)w + K_{1}}$$
 
-so \\(\hat{D}_{i}\\) (called `denominator_state` in the code) satistfies
+so \\(\hat{D}_{i}\\) (called `denominator_state` in the code) satisfies
 
 $$\hat{D}_{0} = 0 \hbox{  and  } \hat{D}_{j+1} = e^{K_{j}} + e^{w} \hat{D}_{j}$$
 

@@ -12,10 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch SAM model."""
+"""PyTorch SAM model."""
 
 import collections
-import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -36,13 +35,6 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "SamConfig"
 _CHECKPOINT_FOR_DOC = "facebook/sam-vit-huge"
-
-SAM_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/sam-vit-huge",
-    "facebook/sam-vit-large",
-    "facebook/sam-vit-base",
-    # See all SAM models at https://huggingface.co/models?filter=sam
-]
 
 
 @dataclass
@@ -71,8 +63,8 @@ class SamVisionEncoderOutput(ModelOutput):
 
     image_embeds: Optional[torch.FloatTensor] = None
     last_hidden_state: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
@@ -106,9 +98,9 @@ class SamImageSegmentationOutput(ModelOutput):
 
     iou_scores: torch.FloatTensor = None
     pred_masks: torch.FloatTensor = None
-    vision_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    vision_attentions: Optional[Tuple[torch.FloatTensor]] = None
-    mask_decoder_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    vision_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    vision_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    mask_decoder_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 class SamPatchEmbeddings(nn.Module):
@@ -239,7 +231,7 @@ class SamAttention(nn.Module):
         # SamAttention
         _, _, _, c_per_head = query.shape
         attn = query @ key.permute(0, 1, 3, 2)  # batch_size * point_batch_size  x N_heads x N_tokens x N_tokens
-        attn = attn / math.sqrt(c_per_head)
+        attn = attn / (c_per_head**0.5)
         attn = torch.softmax(attn, dim=-1)
 
         if attention_similarity is not None:
@@ -507,8 +499,8 @@ class SamMaskDecoder(nn.Module):
 
         # Expand per-image data in batch direction to be per-point
         image_embeddings = image_embeddings + dense_prompt_embeddings
-        image_embeddings = image_embeddings.repeat(point_batch_size, 1, 1, 1)
-        image_positional_embeddings = image_positional_embeddings.repeat(point_batch_size, 1, 1, 1)
+        image_embeddings = image_embeddings.repeat_interleave(point_batch_size, 0)
+        image_positional_embeddings = image_positional_embeddings.repeat_interleave(point_batch_size, 0)
 
         # Run the transformer, image_positional_embedding are consumed
         point_embedding, image_embeddings, attentions = self.transformer(
@@ -1042,15 +1034,8 @@ class SamVisionEncoder(nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                 )
             else:
@@ -1085,6 +1070,7 @@ class SamPreTrainedModel(PreTrainedModel):
     config_class = SamConfig
     base_model_prefix = "sam"
     main_input_name = "pixel_values"
+    _no_split_modules = ["SamVisionAttention"]
 
     def _init_weights(self, module):
         std = self.config.initializer_range
@@ -1190,7 +1176,6 @@ SAM_INPUTS_DOCSTRING = r"""
     SAM_START_DOCSTRING,
 )
 class SamModel(SamPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"prompt_encoder.shared_embedding.positional_embedding"]
     _tied_weights_keys = ["prompt_encoder.shared_embedding.positional_embedding"]
 
     def __init__(self, config):
@@ -1297,7 +1282,7 @@ class SamModel(SamPreTrainedModel):
         target_embedding: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict=None,
+        return_dict: Optional[bool] = None,
         **kwargs,
     ) -> List[Dict[str, torch.Tensor]]:
         r"""

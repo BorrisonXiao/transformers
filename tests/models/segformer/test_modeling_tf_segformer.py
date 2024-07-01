@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TensorFlow SegFormer model. """
+"""Testing suite for the TensorFlow SegFormer model."""
 
 from __future__ import annotations
 
@@ -34,12 +34,11 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers import TFSegformerForImageClassification, TFSegformerForSemanticSegmentation, TFSegformerModel
-    from transformers.models.segformer.modeling_tf_segformer import TF_SEGFORMER_PRETRAINED_MODEL_ARCHIVE_LIST
 
 if is_vision_available():
     from PIL import Image
 
-    from transformers import SegformerFeatureExtractor
+    from transformers import SegformerImageProcessor
 
 
 class TFSegformerConfigTester(ConfigTester):
@@ -58,11 +57,11 @@ class TFSegformerModelTester:
         image_size=64,
         num_channels=3,
         num_encoder_blocks=4,
-        depths=[2, 2, 2, 2],
+        depths=[1, 1, 1, 1],
         sr_ratios=[8, 4, 2, 1],
-        hidden_sizes=[16, 32, 64, 128],
+        hidden_sizes=[8, 8, 16, 16],
         downsampling_rates=[1, 4, 8, 16],
-        num_attention_heads=[1, 2, 4, 8],
+        num_attention_heads=[1, 1, 2, 2],
         is_training=True,
         use_labels=True,
         hidden_act="gelu",
@@ -438,9 +437,9 @@ class TFSegformerModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Tes
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_SEGFORMER_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFSegformerModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "nvidia/segformer-b0-finetuned-ade-512-512"
+        model = TFSegformerModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -454,13 +453,13 @@ class TFSegformerModelIntegrationTest(unittest.TestCase):
     @slow
     def test_inference_image_segmentation_ade(self):
         # only resize + normalize
-        feature_extractor = SegformerFeatureExtractor(
+        image_processor = SegformerImageProcessor(
             image_scale=(512, 512), keep_ratio=False, align=False, do_random_crop=False
         )
         model = TFSegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512")
 
         image = prepare_img()
-        encoded_inputs = feature_extractor(images=image, return_tensors="tf")
+        encoded_inputs = image_processor(images=image, return_tensors="tf")
         pixel_values = encoded_inputs.pixel_values
 
         outputs = model(pixel_values, training=False)
@@ -480,7 +479,7 @@ class TFSegformerModelIntegrationTest(unittest.TestCase):
     @slow
     def test_inference_image_segmentation_city(self):
         # only resize + normalize
-        feature_extractor = SegformerFeatureExtractor(
+        image_processor = SegformerImageProcessor(
             image_scale=(512, 512), keep_ratio=False, align=False, do_random_crop=False
         )
         model = TFSegformerForSemanticSegmentation.from_pretrained(
@@ -488,7 +487,7 @@ class TFSegformerModelIntegrationTest(unittest.TestCase):
         )
 
         image = prepare_img()
-        encoded_inputs = feature_extractor(images=image, return_tensors="tf")
+        encoded_inputs = image_processor(images=image, return_tensors="tf")
         pixel_values = encoded_inputs.pixel_values
 
         outputs = model(pixel_values, training=False)

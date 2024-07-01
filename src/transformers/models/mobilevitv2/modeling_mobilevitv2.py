@@ -14,8 +14,7 @@
 # limitations under the License.
 #
 # Original license: https://github.com/apple/ml-cvnets/blob/main/LICENSE
-""" PyTorch MobileViTV2 model."""
-
+"""PyTorch MobileViTV2 model."""
 
 from typing import Optional, Tuple, Union
 
@@ -55,12 +54,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 512, 8, 8]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "apple/mobilevitv2-1.0-imagenet1k-256"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
-
-
-MOBILEVITV2_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "apple/mobilevitv2-1.0-imagenet1k-256"
-    # See all MobileViTV2 models at https://huggingface.co/models?filter=mobilevitv2
-]
 
 
 # Copied from transformers.models.mobilevit.modeling_mobilevit.make_divisible
@@ -582,15 +575,8 @@ class MobileViTV2Encoder(nn.Module):
 
         for i, layer_module in enumerate(self.layer):
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs)
-
-                    return custom_forward
-
-                hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                hidden_states = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                 )
             else:
@@ -616,6 +602,7 @@ class MobileViTV2PreTrainedModel(PreTrainedModel):
     base_model_prefix = "mobilevitv2"
     main_input_name = "pixel_values"
     supports_gradient_checkpointing = True
+    _no_split_modules = ["MobileViTV2Layer"]
 
     def _init_weights(self, module: Union[nn.Linear, nn.Conv2d, nn.LayerNorm]) -> None:
         """Initialize the weights"""
@@ -628,10 +615,6 @@ class MobileViTV2PreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, MobileViTV2Encoder):
-            module.gradient_checkpointing = value
 
 
 MOBILEVITV2_START_DOCSTRING = r"""
@@ -953,7 +936,6 @@ class MobileViTV2DeepLabV3(nn.Module):
     """,
     MOBILEVITV2_START_DOCSTRING,
 )
-# Copied from transformers.models.mobilevit.modeling_mobilevit.MobileViTForSemanticSegmentation with MOBILEVIT->MOBILEVITV2,MobileViT->MobileViTV2,mobilevit->mobilevitv2
 class MobileViTV2ForSemanticSegmentation(MobileViTV2PreTrainedModel):
     def __init__(self, config: MobileViTV2Config) -> None:
         super().__init__(config)
@@ -984,15 +966,16 @@ class MobileViTV2ForSemanticSegmentation(MobileViTV2PreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import AutoImageProcessor, MobileViTV2ForSemanticSegmentation
-        >>> from PIL import Image
         >>> import requests
+        >>> import torch
+        >>> from PIL import Image
+        >>> from transformers import AutoImageProcessor, MobileViTV2ForSemanticSegmentation
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
 
-        >>> image_processor = AutoImageProcessor.from_pretrained("apple/deeplabv3-mobilevitv2-small")
-        >>> model = MobileViTV2ForSemanticSegmentation.from_pretrained("apple/deeplabv3-mobilevitv2-small")
+        >>> image_processor = AutoImageProcessor.from_pretrained("apple/mobilevitv2-1.0-imagenet1k-256")
+        >>> model = MobileViTV2ForSemanticSegmentation.from_pretrained("apple/mobilevitv2-1.0-imagenet1k-256")
 
         >>> inputs = image_processor(images=image, return_tensors="pt")
 
@@ -1007,6 +990,9 @@ class MobileViTV2ForSemanticSegmentation(MobileViTV2PreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        if labels is not None and self.config.num_labels == 1:
+            raise ValueError("The number of labels should be greater than one")
+
         outputs = self.mobilevitv2(
             pixel_values,
             output_hidden_states=True,  # we need the intermediate hidden states
@@ -1019,15 +1005,12 @@ class MobileViTV2ForSemanticSegmentation(MobileViTV2PreTrainedModel):
 
         loss = None
         if labels is not None:
-            if self.config.num_labels == 1:
-                raise ValueError("The number of labels should be greater than one")
-            else:
-                # upsample logits to the images' original size
-                upsampled_logits = nn.functional.interpolate(
-                    logits, size=labels.shape[-2:], mode="bilinear", align_corners=False
-                )
-                loss_fct = CrossEntropyLoss(ignore_index=self.config.semantic_loss_ignore_index)
-                loss = loss_fct(upsampled_logits, labels)
+            # upsample logits to the images' original size
+            upsampled_logits = nn.functional.interpolate(
+                logits, size=labels.shape[-2:], mode="bilinear", align_corners=False
+            )
+            loss_fct = CrossEntropyLoss(ignore_index=self.config.semantic_loss_ignore_index)
+            loss = loss_fct(upsampled_logits, labels)
 
         if not return_dict:
             if output_hidden_states:

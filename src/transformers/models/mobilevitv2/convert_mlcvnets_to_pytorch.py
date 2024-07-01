@@ -14,7 +14,6 @@
 # limitations under the License.
 """Convert MobileViTV2 checkpoints from the ml-cvnets library."""
 
-
 import argparse
 import collections
 import json
@@ -259,8 +258,8 @@ def convert_mobilevitv2_checkpoint(task_name, checkpoint_path, orig_config_path,
     model.load_state_dict(state_dict)
 
     # Check outputs on an image, prepared by MobileViTImageProcessor
-    feature_extractor = MobileViTImageProcessor(crop_size=config.image_size, size=config.image_size + 32)
-    encoding = feature_extractor(images=prepare_img(), return_tensors="pt")
+    image_processor = MobileViTImageProcessor(crop_size=config.image_size, size=config.image_size + 32)
+    encoding = image_processor(images=prepare_img(), return_tensors="pt")
     outputs = model(**encoding)
 
     # verify classification model
@@ -276,8 +275,8 @@ def convert_mobilevitv2_checkpoint(task_name, checkpoint_path, orig_config_path,
     Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
     print(f"Saving model {task_name} to {pytorch_dump_folder_path}")
     model.save_pretrained(pytorch_dump_folder_path)
-    print(f"Saving feature extractor to {pytorch_dump_folder_path}")
-    feature_extractor.save_pretrained(pytorch_dump_folder_path)
+    print(f"Saving image processor to {pytorch_dump_folder_path}")
+    image_processor.save_pretrained(pytorch_dump_folder_path)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ from copy import deepcopy  # noqa
 
 from parameterized import parameterized  # noqa
 from transformers import TrainingArguments, is_torch_available  # noqa
-from transformers.deepspeed import is_deepspeed_available  # noqa
+from transformers.integrations.deepspeed import is_deepspeed_available  # noqa
 from transformers.file_utils import WEIGHTS_NAME  # noqa
 from transformers.testing_utils import (  # noqa
     CaptureLogger,
@@ -161,7 +161,7 @@ class TestDeepSpeedWav2Vec2(TestCasePlus):
             --num_train_epochs {str(num_train_epochs)}
             --per_device_train_batch_size 2
             --per_device_eval_batch_size 2
-            --evaluation_strategy steps
+            --eval_strategy steps
             --learning_rate 5e-4
             --warmup_steps 8
             --orthography timit

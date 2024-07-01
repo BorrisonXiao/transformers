@@ -95,7 +95,7 @@ Specify `from_pt=True` to convert a checkpoint from PyTorch to TensorFlow:
 >>> tf_model = TFDistilBertForSequenceClassification.from_pretrained("path/to/awesome-name-you-picked", from_pt=True)
 ```
 
-Then you can save your new TensorFlow model with it's new checkpoint:
+Then you can save your new TensorFlow model with its new checkpoint:
 
 ```py
 >>> tf_model.save_pretrained("path/to/awesome-name-you-picked")
@@ -201,7 +201,7 @@ Or perhaps you'd like to add the TensorFlow version of your fine-tuned PyTorch m
 >>> tf_model.push_to_hub("my-awesome-model")
 ```
 
-Now when you navigate to the your Hugging Face profile, you should see your newly created model repository. Clicking on the **Files** tab will display all the files you've uploaded to the repository.
+Now when you navigate to your Hugging Face profile, you should see your newly created model repository. Clicking on the **Files** tab will display all the files you've uploaded to the repository.
 
 For more details on how to create and upload files to a repository, refer to the Hub documentation [here](https://huggingface.co/docs/hub/how-to-upstream).
 
@@ -229,4 +229,4 @@ To make sure users understand your model's capabilities, limitations, potential 
 * Manually creating and uploading a `README.md` file.
 * Clicking on the **Edit model card** button in your model repository.
 
-Take a look at the DistilBert [model card](https://huggingface.co/distilbert-base-uncased) for a good example of the type of information a model card should include. For more details about other options you can control in the `README.md` file such as a model's carbon footprint or widget examples, refer to the documentation [here](https://huggingface.co/docs/hub/models-cards).
+Take a look at the DistilBert [model card](https://huggingface.co/distilbert/distilbert-base-uncased) for a good example of the type of information a model card should include. For more details about other options you can control in the `README.md` file such as a model's carbon footprint or widget examples, refer to the documentation [here](https://huggingface.co/docs/hub/models-cards).
