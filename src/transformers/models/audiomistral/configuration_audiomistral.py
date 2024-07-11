@@ -99,22 +99,29 @@ class AudioMistralConfig(PretrainedConfig):
         self,
         vocab_size=32768,
         num_mel_bins=128,
-        encoder_layers=32,
+        encoder_layers=2,  # 32
         encoder_attention_heads=20,
-        encoder_ffn_dim=5210,
+        encoder_ffn_dim=5120,
         encoder_layerdrop=0.0,
         encoder_activation_function="gelu",
         is_encoder_decoder=False,
-        encoder_d_model=1280,
+        encoder_d_model=240,  # 1280
         encoder_dropout=0.0,
         encoder_attention_dropout=0.0,
         encoder_activation_dropout=0.0,
         encoder_init_std=0.02,
-        max_source_positions=3000,
+        max_source_positions=1500,
         scale_embedding=False,
+        apply_spec_augment=False,
+        mask_time_prob=0.05,
+        mask_time_length=10,
+        mask_time_min_masks=2,
+        mask_feature_prob=0.0,
+        mask_feature_length=10,
+        mask_feature_min_masks=0,
         hidden_size=4096,
-        intermediate_size=14336,
-        num_hidden_layers=32,
+        intermediate_size=4096,  # 14336
+        num_hidden_layers=2,  # 32
         num_attention_heads=32,
         num_key_value_heads=8,
         hidden_act="silu",
@@ -153,6 +160,15 @@ class AudioMistralConfig(PretrainedConfig):
         self.encoder_init_std = encoder_init_std
         self.max_source_positions = max_source_positions
         self.scale_embedding = scale_embedding
+
+        # fine-tuning config parameters for SpecAugment: https://arxiv.org/abs/1904.08779
+        self.apply_spec_augment = apply_spec_augment
+        self.mask_time_prob = mask_time_prob
+        self.mask_time_length = mask_time_length
+        self.mask_time_min_masks = mask_time_min_masks
+        self.mask_feature_prob = mask_feature_prob
+        self.mask_feature_length = mask_feature_length
+        self.mask_feature_min_masks = mask_feature_min_masks
 
         # for backward compatibility
         if num_key_value_heads is None:

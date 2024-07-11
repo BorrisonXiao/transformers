@@ -8,6 +8,7 @@ import math
 from torch import nn
 import torch
 from torch.nn import CrossEntropyLoss
+import numpy as np
 
 from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache, SlidingWindowCache, StaticCache
@@ -68,13 +69,168 @@ def _get_unpad_data(attention_mask):
     )
 
 
-class LengthAdapter(nn.Module):
+# Copied from transformers.models.wav2vec2.modeling_wav2vec2._compute_mask_indices
+def _compute_mask_indices(
+    shape: Tuple[int, int],
+    mask_prob: float,
+    mask_length: int,
+    attention_mask: Optional[torch.LongTensor] = None,
+    min_masks: int = 0,
+) -> np.ndarray:
+    """
+    Computes random mask spans for a given shape. Used to implement [SpecAugment: A Simple Data Augmentation Method for
+    ASR](https://arxiv.org/abs/1904.08779). Note that this method is not optimized to run on TPU and should be run on
+    CPU as part of the preprocessing during training.
+
+    Args:
+        shape: The shape for which to compute masks. This should be of a tuple of size 2 where
+               the first element is the batch size and the second element is the length of the axis to span.
+        mask_prob:  The percentage of the whole axis (between 0 and 1) which will be masked. The number of
+                    independently generated mask spans of length `mask_length` is computed by
+                    `mask_prob*shape[1]/mask_length`. Note that due to overlaps, `mask_prob` is an upper bound and the
+                    actual percentage will be smaller.
+        mask_length: size of the mask
+        min_masks: minimum number of masked spans
+        attention_mask: A (right-padded) attention mask which independently shortens the feature axis of
+                        each batch dimension.
+    """
+    batch_size, sequence_length = shape
+
+    if mask_length < 1:
+        raise ValueError("`mask_length` has to be bigger than 0.")
+
+    if mask_length > sequence_length:
+        raise ValueError(
+            f"`mask_length` has to be smaller than `sequence_length`, but got `mask_length`: {mask_length}"
+            f" and `sequence_length`: {sequence_length}`"
+        )
+
+    # epsilon is used for probabilistic rounding
+    epsilon = np.random.rand(1).item()
+
+    def compute_num_masked_span(input_length):
+        """Given input length, compute how many spans should be masked"""
+        num_masked_span = int(mask_prob * input_length / mask_length + epsilon)
+        num_masked_span = max(num_masked_span, min_masks)
+
+        # make sure num masked span <= sequence_length
+        if num_masked_span * mask_length > sequence_length:
+            num_masked_span = sequence_length // mask_length
+
+        # make sure num_masked span is also <= input_length - (mask_length - 1)
+        if input_length - (mask_length - 1) < num_masked_span:
+            num_masked_span = max(input_length - (mask_length - 1), 0)
+
+        return num_masked_span
+
+    # compute number of masked spans in batch
+    input_lengths = (
+        attention_mask.sum(-1).detach().tolist()
+        if attention_mask is not None
+        else [sequence_length for _ in range(batch_size)]
+    )
+
+    # SpecAugment mask to fill
+    spec_aug_mask = np.zeros((batch_size, sequence_length), dtype=bool)
+    spec_aug_mask_idxs = []
+
+    max_num_masked_span = compute_num_masked_span(sequence_length)
+
+    if max_num_masked_span == 0:
+        return spec_aug_mask
+
+    for input_length in input_lengths:
+        # compute num of masked spans for this input
+        num_masked_span = compute_num_masked_span(input_length)
+
+        # get random indices to mask
+        spec_aug_mask_idx = np.random.choice(
+            np.arange(input_length - (mask_length - 1)), num_masked_span, replace=False
+        )
+
+        # pick first sampled index that will serve as a dummy index to pad vector
+        # to ensure same dimension for all batches due to probabilistic rounding
+        # Picking first sample just pads those vectors twice.
+        if len(spec_aug_mask_idx) == 0:
+            # this case can only happen if `input_length` is strictly smaller then
+            # `sequence_length` in which case the last token has to be a padding
+            # token which we can use as a dummy mask id
+            dummy_mask_idx = sequence_length - 1
+        else:
+            dummy_mask_idx = spec_aug_mask_idx[0]
+
+        spec_aug_mask_idx = np.concatenate(
+            [spec_aug_mask_idx, np.ones(
+                max_num_masked_span - num_masked_span, dtype=np.int32) * dummy_mask_idx]
+        )
+        spec_aug_mask_idxs.append(spec_aug_mask_idx)
+
+    spec_aug_mask_idxs = np.array(spec_aug_mask_idxs)
+
+    # expand masked indices to masked spans
+    spec_aug_mask_idxs = np.broadcast_to(
+        spec_aug_mask_idxs[:, :,
+                           None], (batch_size, max_num_masked_span, mask_length)
+    )
+    spec_aug_mask_idxs = spec_aug_mask_idxs.reshape(
+        batch_size, max_num_masked_span * mask_length)
+
+    # add offset to the starting indexes so that indexes now create a span
+    offsets = np.arange(mask_length)[None, None, :]
+    offsets = np.broadcast_to(offsets, (batch_size, max_num_masked_span, mask_length)).reshape(
+        batch_size, max_num_masked_span * mask_length
+    )
+    spec_aug_mask_idxs = spec_aug_mask_idxs + offsets
+
+    # ensure that we cannot have indices larger than sequence_length
+    if spec_aug_mask_idxs.max() > sequence_length - 1:
+        spec_aug_mask_idxs[spec_aug_mask_idxs >
+                           sequence_length - 1] = sequence_length - 1
+
+    # scatter indices to mask
+    np.put_along_axis(spec_aug_mask, spec_aug_mask_idxs, 1, -1)
+
+    return spec_aug_mask
+
+
+class ModalityAdapter(nn.Module):
     def __init__(self, config: AudioMistralConfig):
         super().__init__()
-        embed_dim = config.encoder_d_model
-        # TODO: Finish this
-        self.conv1 = nn.Conv1d(self.num_mel_bins, embed_dim, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv1d(embed_dim, embed_dim, kernel_size=3, stride=2, padding=1)
+        input_dim = config.encoder_d_model
+        output_dim = config.hidden_size
+        self.conv1 = nn.Conv1d(
+            in_channels=input_dim, out_channels=output_dim, stride=2, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(output_dim, output_dim,
+                               kernel_size=5, stride=2, padding=1)
+        self.conv3 = nn.Conv1d(output_dim, output_dim,
+                               kernel_size=5, stride=2, padding=1)
+        self.conv4 = nn.Conv1d(output_dim, output_dim,
+                               kernel_size=3, stride=1, padding=0)
+        self.activation_fn = ACT2FN[config.encoder_activation_function]
+        self.fc = nn.Linear(output_dim, output_dim)
+        self.layernorm = nn.LayerNorm(output_dim)
+
+    def forward(
+        self,
+        x,
+    ):
+        y = x.permute(0, 2, 1)
+        y = self.conv1(y)
+        y = self.conv2(y)
+        y = y.permute(0, 2, 1)
+        y = self.layernorm(y)
+        y = y.permute(0, 2, 1)
+        y = self.activation_fn(y)
+        y = self.conv3(y)
+        y = self.conv4(y)
+        y = y.permute(0, 2, 1)
+        y = self.fc(y)
+        return y
+
+    def _freeze_parameters(self):
+        for param in self.parameters():
+            param.requires_grad = False
+        self._requires_grad = False
 
 
 # Copied from transformers.models.whisper.modeling_whisper.WhisperAttention
@@ -801,12 +957,13 @@ class WhisperEncoder(AudioMistralPreTrainedModel):
                 Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
         """
 
-        expected_seq_length = self.config.max_source_positions * \
-            self.conv1.stride[0] * self.conv2.stride[0]
-        if input_features.shape[-1] != expected_seq_length:
-            raise ValueError(
-                f"Whisper expects the mel input features to be of length {expected_seq_length}, but found {input_features.shape[-1]}. Make sure to pad the input mel features to {expected_seq_length}."
-            )
+        # Note(Cihan): Fixed-length input no longer used
+        # expected_seq_length = self.config.max_source_positions * \
+        #     self.conv1.stride[0] * self.conv2.stride[0]
+        # if input_features.shape[-1] != expected_seq_length:
+        #     raise ValueError(
+        #         f"Whisper expects the mel input features to be of length {expected_seq_length}, but found {input_features.shape[-1]}. Make sure to pad the input mel features to {expected_seq_length}."
+        #     )
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -817,7 +974,8 @@ class WhisperEncoder(AudioMistralPreTrainedModel):
         inputs_embeds = nn.functional.gelu(self.conv2(inputs_embeds))
 
         inputs_embeds = inputs_embeds.permute(0, 2, 1)
-        embed_pos = self.embed_positions.weight
+        # Modified for dynamic length input_features
+        embed_pos = self.embed_positions.weight[:inputs_embeds.shape[1]]
 
         hidden_states = inputs_embeds + embed_pos
         hidden_states = nn.functional.dropout(
@@ -1437,7 +1595,7 @@ class MistralSdpaAttention(MistralAttention):
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
             logger.warning_once(
-                "MistralModel is using MistralSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
+                "AudioMistralModel is using MistralSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
                 'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
             )
             return super().forward(
@@ -1685,7 +1843,7 @@ MISTRAL_INPUTS_DOCSTRING = r"""
     "The bare Mistral Model outputting raw hidden-states without any specific head on top.",
     MISTRAL_START_DOCSTRING,
 )
-class MistralModel(AudioMistralPreTrainedModel):
+class AudioMistralModel(AudioMistralPreTrainedModel):
     """
     Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MistralDecoderLayer`]
 
@@ -1728,6 +1886,7 @@ class MistralModel(AudioMistralPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
@@ -1760,6 +1919,11 @@ class MistralModel(AudioMistralPreTrainedModel):
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
+            encoder_seq_len = encoder_hidden_states.shape[1]
+            inputs_embeds = torch.cat(
+                (encoder_hidden_states, inputs_embeds), dim=1)
+            attention_mask = torch.cat((torch.ones(
+                (inputs_embeds.shape[0], encoder_seq_len), device=inputs_embeds.device), attention_mask), dim=1)
 
         return_legacy_cache = False
         if use_cache and not isinstance(past_key_values, Cache):
@@ -1967,7 +2131,8 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.encoder = WhisperEncoder(config)
-        self.model = MistralModel(config)
+        self.adapter = ModalityAdapter(config)
+        self.model = AudioMistralModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(
             config.hidden_size, config.vocab_size, bias=False)
@@ -2008,14 +2173,60 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         Calling this function will disable the gradient computation for the Mistral decoder so that its parameters will
         not be updated during training.
         """
-        self.decoder._freeze_parameters()
+        self.model._freeze_parameters()
 
-    def freeze_length_adapter(self):
+    def freeze_adapter(self):
         """
         Calling this function will disable the gradient computation for the length adapter so that its parameters will
         not be updated during training.
         """
-        self.length_adapter._freeze_parameters()
+        self.adapter._freeze_parameters()
+
+    def _mask_input_features(
+        self,
+        input_features: torch.FloatTensor,
+        attention_mask: Optional[torch.LongTensor] = None,
+    ):
+        """
+        Masks extracted features along time axis and/or along feature axis according to
+        [SpecAugment](https://arxiv.org/abs/1904.08779).
+        """
+
+        # `config.apply_spec_augment` can set masking to False
+        if not getattr(self.config, "apply_spec_augment", True):
+            return input_features
+
+        # generate indices & apply SpecAugment along time axis
+        batch_size, hidden_size, sequence_length = input_features.size()
+
+        if self.config.mask_time_prob > 0 and self.training:
+            # generate indices & apply SpecAugment along time axis
+            mask_time_indices = _compute_mask_indices(
+                (batch_size, sequence_length),
+                mask_prob=self.config.mask_time_prob,
+                mask_length=self.config.mask_time_length,
+                attention_mask=attention_mask,
+                min_masks=self.config.mask_time_min_masks,
+            )
+            mask_time_indices = torch.tensor(
+                mask_time_indices, device=input_features.device, dtype=torch.bool)
+            mask_time_indices = mask_time_indices[:,
+                                                  None].expand(-1, hidden_size, -1)
+            input_features[mask_time_indices] = 0
+
+        if self.config.mask_feature_prob > 0 and self.training:
+            # generate indices & apply SpecAugment along feature axis
+            mask_feature_indices = _compute_mask_indices(
+                (batch_size, hidden_size),
+                mask_prob=self.config.mask_feature_prob,
+                mask_length=self.config.mask_feature_length,
+                min_masks=self.config.mask_feature_min_masks,
+            )
+            mask_feature_indices = torch.tensor(
+                mask_feature_indices, device=input_features.device, dtype=torch.bool)
+            input_features[mask_feature_indices] = 0
+
+        return input_features
 
     @add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
@@ -2027,7 +2238,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         encoder_output_attentions: Optional[bool] = None,
         encoder_output_hidden_states: Optional[bool] = None,
         encoder_return_dict: Optional[bool] = None,
-        encoder_use_reentrant: Optional[bool] = False,
+        encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -2039,6 +2250,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        ignore_index: int = -100,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -2071,30 +2283,36 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        
 
         if encoder_outputs is None:
-            breakpoint()
-            input_features = self._mask_input_features(input_features, attention_mask=encoder_attention_mask)
-            
+            input_features = self._mask_input_features(
+                input_features, attention_mask=encoder_attention_mask).to(self.dtype)
+
             encoder_outputs = self.encoder(
                 input_features,
                 head_mask=encoder_head_mask,
                 output_attentions=encoder_output_attentions,
                 output_hidden_states=encoder_output_hidden_states,
                 return_dict=encoder_return_dict,
-                use_reentrant=self.config.use_reentrant if hasattr(self.config, "use_reentrant") else False
+                use_reentrant=self.config.use_reentrant if hasattr(
+                    self.config, "use_reentrant") else False
             )
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
             encoder_outputs = BaseModelOutput(
                 last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
+                hidden_states=encoder_outputs[1] if len(
+                    encoder_outputs) > 1 else None,
+                attentions=encoder_outputs[2] if len(
+                    encoder_outputs) > 2 else None,
             )
+
+        adapter_outputs = self.adapter(encoder_outputs[0])
+        audio_seq_len = adapter_outputs.size(1)
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
             input_ids=input_ids,
+            encoder_hidden_states=adapter_outputs,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
@@ -2112,6 +2330,9 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
 
         loss = None
         if labels is not None:
+            # Labels are expanded with masks for the audio representations
+            labels = torch.cat((torch.ones((labels.shape[0], audio_seq_len), dtype=torch.long).to(
+                labels.device) * ignore_index, labels), dim=-1)
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
