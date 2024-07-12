@@ -231,6 +231,11 @@ class ModalityAdapter(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
         self._requires_grad = False
+        
+    def _unfreeze_parameters(self):
+        for param in self.parameters():
+            param.requires_grad = True
+        self._requires_grad = True
 
 
 # Copied from transformers.models.whisper.modeling_whisper.WhisperAttention
@@ -2181,6 +2186,9 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         not be updated during training.
         """
         self.adapter._freeze_parameters()
+        
+    def unfreeze_adapter(self):
+        self.adapter._unfreeze_parameters()
 
     def _mask_input_features(
         self,
