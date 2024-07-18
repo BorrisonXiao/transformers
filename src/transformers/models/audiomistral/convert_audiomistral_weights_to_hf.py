@@ -80,10 +80,10 @@ def convert(
 
     model = AudioMistralForCausalLM(_config)
     whisper = WhisperForConditionalGeneration.from_pretrained(
-        f"openai/whisper-{whisper_model}"
+        f"openai/whisper-{whisper_model}",
     )
     mistral = MistralForCausalLM.from_pretrained(
-        f"mistralai/Mistral-{mistral_model}"
+        f"mistralai/Mistral-{mistral_model}",
     )
     model.encoder.load_state_dict(whisper.model.encoder.state_dict())
     model.model.load_state_dict(mistral.model.state_dict())

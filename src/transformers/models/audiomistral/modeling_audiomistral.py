@@ -2,7 +2,7 @@
 """PyTorch AudioMistral model."""
 
 import inspect
-from typing import Optional, Tuple, Union, List
+from typing import Optional, Tuple, Union, List, Dict, Any
 import math
 
 from torch import nn
@@ -15,12 +15,12 @@ from ...cache_utils import Cache, DynamicCache, SlidingWindowCache, StaticCache
 from .configuration_audiomistral import AudioMistralConfig
 from ...modeling_outputs import (
     BaseModelOutput,
-    BaseModelOutputWithPast,
     CausalLMOutputWithPast,
 )
 from ...modeling_attn_mask_utils import AttentionMaskConverter
 from ...modeling_utils import PreTrainedModel
 from ...utils import (
+    ModelOutput,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
     is_flash_attn_2_available,
@@ -28,10 +28,94 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
+from dataclasses import dataclass
 
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "AudioMistralConfig"
+
+
+@dataclass
+class BaseModelOutputWithPastAndMask(ModelOutput):
+    """
+    Base class for model's outputs that may also contain a past key/values (to speed up sequential decoding).
+
+    Args:
+        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
+            Sequence of hidden-states at the output of the last layer of the model.
+
+            If `past_key_values` is used only the last hidden-state of the sequences of shape `(batch_size, 1,
+            hidden_size)` is output.
+        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
+            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
+            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and optionally if
+            `config.is_encoder_decoder=True` 2 additional tensors of shape `(batch_size, num_heads,
+            encoder_sequence_length, embed_size_per_head)`.
+
+            Contains pre-computed hidden-states (key and values in the self-attention blocks and optionally if
+            `config.is_encoder_decoder=True` in the cross-attention blocks) that can be used (see `past_key_values`
+            input) to speed up sequential decoding.
+        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
+            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
+            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
+        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+    """
+
+    last_hidden_state: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    attention_mask: Optional[torch.FloatTensor] = None
+    cache_position: Optional[torch.LongTensor] = None
+    position_ids: Optional[torch.LongTensor] = None
+
+
+@dataclass
+class CausalAudioLMOutputWithPast(ModelOutput):
+    """
+    Base class for causal language model (or autoregressive) outputs.
+
+    Args:
+        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
+            Language modeling loss (for next-token prediction).
+        logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
+            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
+        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
+            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
+            `(batch_size, num_heads, sequence_length, embed_size_per_head)`)
+
+            Contains pre-computed hidden-states (key and values in the self-attention blocks) that can be used (see
+            `past_key_values` input) to speed up sequential decoding.
+        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
+            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
+            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
+        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+    """
+
+    loss: Optional[torch.FloatTensor] = None
+    logits: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    attention_mask: Optional[torch.FloatTensor] = None
+    encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    cache_position: Optional[torch.LongTensor] = None
+    position_ids: Optional[torch.LongTensor] = None
+
 
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
@@ -231,7 +315,7 @@ class ModalityAdapter(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
         self._requires_grad = False
-        
+
     def _unfreeze_parameters(self):
         for param in self.parameters():
             param.requires_grad = True
@@ -841,7 +925,7 @@ class WhisperEncoderLayer(nn.Module):
 class AudioMistralPreTrainedModel(PreTrainedModel):
     config_class = AudioMistralConfig
     base_model_prefix = "model"
-    main_input_name = "input_features"
+    main_input_name = "input_ids"
     supports_gradient_checkpointing = True
     _no_split_modules = ["WhisperEncoderLayer", "MistralDecoderLayer"]
     _supports_flash_attn_2 = True
@@ -1901,7 +1985,7 @@ class AudioMistralModel(AudioMistralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPast]:
+    ) -> Union[Tuple, BaseModelOutputWithPastAndMask]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1924,11 +2008,31 @@ class AudioMistralModel(AudioMistralPreTrainedModel):
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
-            encoder_seq_len = encoder_hidden_states.shape[1]
-            inputs_embeds = torch.cat(
-                (encoder_hidden_states, inputs_embeds), dim=1)
-            attention_mask = torch.cat((torch.ones(
-                (inputs_embeds.shape[0], encoder_seq_len), device=inputs_embeds.device), attention_mask), dim=1)
+            past_length = 0
+            # Omit tokens covered by past_key_values
+            if past_key_values is not None:
+                # Past key values are always initialized with a `Cache` object -> no need for if-else anymore
+                past_length = cache_position[0] if cache_position is not None else past_key_values.get_seq_length(
+                )
+            # Only concatenate the audio embeddings once
+            if past_length == 0 or not use_cache:
+                if encoder_hidden_states is not None:
+                    encoder_outputs_len = encoder_hidden_states.shape[1]
+                    inputs_embeds = torch.cat(
+                        (encoder_hidden_states, inputs_embeds), dim=1)
+                    attention_mask = torch.cat((torch.ones(
+                        (inputs_embeds.shape[0], encoder_outputs_len), device=inputs_embeds.device), attention_mask), dim=1)
+
+                    prefixs = torch.arange(0, encoder_outputs_len, device=position_ids.device).repeat(
+                        input_ids.shape[0], 1)
+                    position_ids = torch.cat(
+                        (prefixs, position_ids + encoder_outputs_len), dim=-1)
+                    cache_position = torch.cat((torch.arange(
+                        0, encoder_outputs_len, device=cache_position.device), cache_position + encoder_outputs_len))
+        else:
+            raise NotImplementedError(
+                "Passing input embeddings is currently not supported for this model"
+            )
 
         return_legacy_cache = False
         if use_cache and not isinstance(past_key_values, Cache):
@@ -2006,11 +2110,14 @@ class AudioMistralModel(AudioMistralPreTrainedModel):
 
         if not return_dict:
             return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
-        return BaseModelOutputWithPast(
+        return BaseModelOutputWithPastAndMask(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
             hidden_states=all_hidden_states,
             attentions=all_self_attns,
+            attention_mask=attention_mask,
+            cache_position=cache_position,
+            position_ids=position_ids,
         )
 
     def _update_causal_mask(
@@ -2186,7 +2293,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         not be updated during training.
         """
         self.adapter._freeze_parameters()
-        
+
     def unfreeze_adapter(self):
         self.adapter._unfreeze_parameters()
 
@@ -2247,6 +2354,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         encoder_output_hidden_states: Optional[bool] = None,
         encoder_return_dict: Optional[bool] = None,
         encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
+        encoder_outputs_len: Optional[int] = None,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -2259,7 +2367,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         ignore_index: int = -100,
-    ) -> Union[Tuple, CausalLMOutputWithPast]:
+    ) -> Union[Tuple, CausalAudioLMOutputWithPast]:
         r"""
         Args:
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -2281,7 +2389,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         >>> inputs = tokenizer(prompt, return_tensors="pt")
 
         >>> # Generate
-        >>> generate_ids = model.generate(inputs.input_ids, max_length=30)
+        >>> generate_ids = model.generate(inputs.input_ids, inputs.input_features, max_length=30)
         >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
         "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
         ```"""
@@ -2296,7 +2404,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
             input_features = self._mask_input_features(
                 input_features, attention_mask=encoder_attention_mask).to(self.dtype)
 
-            encoder_outputs = self.encoder(
+            _encoder_outputs = self.encoder(
                 input_features,
                 head_mask=encoder_head_mask,
                 output_attentions=encoder_output_attentions,
@@ -2305,22 +2413,14 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
                 use_reentrant=self.config.use_reentrant if hasattr(
                     self.config, "use_reentrant") else False
             )
-        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
-            encoder_outputs = BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(
-                    encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(
-                    encoder_outputs) > 2 else None,
-            )
 
-        adapter_outputs = self.adapter(encoder_outputs[0])
-        audio_seq_len = adapter_outputs.size(1)
+            encoder_outputs = self.adapter(_encoder_outputs[0])
+            encoder_outputs_len = encoder_outputs.size(1)
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
             input_ids=input_ids,
-            encoder_hidden_states=adapter_outputs,
+            encoder_hidden_states=encoder_outputs,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
@@ -2339,7 +2439,7 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         loss = None
         if labels is not None:
             # Labels are expanded with masks for the audio representations
-            labels = torch.cat((torch.ones((labels.shape[0], audio_seq_len), dtype=torch.long).to(
+            labels = torch.cat((torch.ones((labels.shape[0], encoder_outputs_len), dtype=torch.long).to(
                 labels.device) * ignore_index, labels), dim=-1)
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
@@ -2356,17 +2456,22 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
 
-        return CausalLMOutputWithPast(
+        return CausalAudioLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            encoder_outputs=encoder_outputs,
+            attention_mask=outputs.attention_mask,
+            cache_position=outputs.cache_position,
+            position_ids=outputs.position_ids,
         )
 
     def prepare_inputs_for_generation(
         self,
         input_ids,
+        input_features=None,
         past_key_values=None,
         attention_mask=None,
         inputs_embeds=None,
@@ -2440,6 +2545,11 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         elif use_cache:
             cache_position = cache_position[-input_length:]
 
+        if "encoder_outputs" in kwargs:
+            model_inputs.update({
+                "encoder_outputs": kwargs["encoder_outputs"]
+            })
+
         model_inputs.update(
             {
                 "position_ids": position_ids,
@@ -2447,9 +2557,78 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
                 "past_key_values": past_key_values,
                 "use_cache": use_cache,
                 "attention_mask": attention_mask,
+                "input_features": input_features,
             }
         )
         return model_inputs
+
+    def _prepare_model_inputs(
+        self,
+        inputs: Optional[torch.Tensor] = None,
+        bos_token_id: Optional[torch.Tensor] = None,
+        model_kwargs: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Optional[str], Dict[str, torch.Tensor]]:
+        """
+        This function extracts the model-specific `inputs` for generation.
+        """
+        # 1. retrieve all kwargs that are non-None or non-model input related.
+        # some encoder-decoder models have different names for model and encoder
+        if (
+            self.config.is_encoder_decoder
+            and hasattr(self, "encoder")
+            and self.encoder.main_input_name != self.main_input_name
+        ):
+            input_name = self.encoder.main_input_name
+        else:
+            input_name = self.main_input_name
+
+        model_kwargs = {k: v for k, v in model_kwargs.items(
+        ) if v is not None or k != input_name}
+
+        # 2. check whether model_input_name is passed as kwarg
+        # if yes and `inputs` is None use kwarg inputs
+        # inputs_kwarg = model_kwargs.pop(input_name, None)
+        # if inputs_kwarg is not None and inputs is not None:
+        #     raise ValueError(
+        #         f"`inputs`: {inputs}` were passed alongside {input_name} which is not allowed. "
+        #         f"Make sure to either pass {inputs} or {input_name}=..."
+        #     )
+        # elif inputs_kwarg is not None:
+        #     inputs = inputs_kwarg
+
+        # 3. In the presence of `inputs_embeds` for text models:
+        # - decoder-only models should complain if the user attempts to pass `inputs_embeds`, but the model
+        # doesn't have its forwarding implemented. `inputs_embeds` is kept in `model_kwargs` and can coexist with
+        # input_ids (`inputs_embeds` will be used in the 1st generation step, as opposed to `input_ids`)
+        # - encoder-decoder models should complain if the user attempts to pass `inputs_embeds` and `input_ids`, and
+        # pull the former to inputs. It will be used in place of `input_ids` to get the encoder hidden states.
+        if input_name == "input_ids" and "inputs_embeds" in model_kwargs:
+            if not self.config.is_encoder_decoder:
+                has_inputs_embeds_forwarding = "inputs_embeds" in set(
+                    inspect.signature(
+                        self.prepare_inputs_for_generation).parameters.keys()
+                )
+                if not has_inputs_embeds_forwarding:
+                    raise ValueError(
+                        f"You passed `inputs_embeds` to `.generate()`, but the model class {self.__class__.__name__} "
+                        "doesn't have its forwarding implemented. See the GPT2 implementation for an example "
+                        "(https://github.com/huggingface/transformers/pull/21405), and feel free to open a PR with it!"
+                    )
+                # In this case, `input_ids` is moved to the `model_kwargs`, so a few automations (like the creation of
+                # the attention mask) can rely on the actual model input.
+                model_kwargs["input_ids"] = self._maybe_initialize_input_ids_for_generation(
+                    inputs, bos_token_id, model_kwargs=model_kwargs
+                )
+            else:
+                if inputs is not None:
+                    raise ValueError(
+                        "You passed `inputs_embeds` and `input_ids` to `.generate()`. Please pick one.")
+            inputs, input_name = model_kwargs["inputs_embeds"], "inputs_embeds"
+
+        # 4. if `inputs` is still None, try to create `input_ids` from BOS token
+        inputs = self._maybe_initialize_input_ids_for_generation(
+            inputs, bos_token_id, model_kwargs)
+        return inputs, input_name, model_kwargs
 
     @staticmethod
     def _reorder_cache(past_key_values, beam_idx):
@@ -2460,3 +2639,56 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
                       for past_state in layer_past),
             )
         return reordered_past
+
+    def _update_model_kwargs_for_generation(
+        self,
+        outputs: ModelOutput,
+        model_kwargs: Dict[str, Any],
+        is_encoder_decoder: bool = False,
+        standardize_cache_format: bool = False,
+        num_new_tokens: int = 1,
+    ) -> Dict[str, Any]:
+        # update past_key_values keeping its naming used in model code
+        cache_name, cache = self._extract_past_from_model_output(
+            outputs, standardize_cache_format=standardize_cache_format
+        )
+        model_kwargs[cache_name] = cache
+        if getattr(outputs, "state", None) is not None:
+            model_kwargs["state"] = outputs.state
+
+        # update token_type_ids with last value
+        if "token_type_ids" in model_kwargs:
+            token_type_ids = model_kwargs["token_type_ids"]
+            model_kwargs["token_type_ids"] = torch.cat(
+                [token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
+
+        if not is_encoder_decoder:
+            # update attention mask
+            if "attention_mask" in model_kwargs:
+                attention_mask = model_kwargs["attention_mask"] if "attention_mask" not in outputs else outputs["attention_mask"]
+                model_kwargs["attention_mask"] = torch.cat(
+                    [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
+                )
+        else:
+            # update decoder attention mask
+            if "decoder_attention_mask" in model_kwargs:
+                decoder_attention_mask = model_kwargs["decoder_attention_mask"]
+                model_kwargs["decoder_attention_mask"] = torch.cat(
+                    [decoder_attention_mask, decoder_attention_mask.new_ones(
+                        (decoder_attention_mask.shape[0], 1))],
+                    dim=-1,
+                )
+
+        if (
+            model_kwargs.get("use_cache", True)
+            and "cache_position" in model_kwargs
+            and model_kwargs["cache_position"] is not None
+        ):
+            cache_position = model_kwargs["cache_position"] if "cache_position" not in outputs else outputs["cache_position"]
+            model_kwargs["cache_position"] = cache_position[-1:] + \
+                num_new_tokens
+
+        if "encoder_outputs" in outputs:
+            model_kwargs["encoder_outputs"] = outputs["encoder_outputs"]
+
+        return model_kwargs
