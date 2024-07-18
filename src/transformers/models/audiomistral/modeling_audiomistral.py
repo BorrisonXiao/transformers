@@ -2023,12 +2023,13 @@ class AudioMistralModel(AudioMistralPreTrainedModel):
                     attention_mask = torch.cat((torch.ones(
                         (inputs_embeds.shape[0], encoder_outputs_len), device=inputs_embeds.device), attention_mask), dim=1)
 
-                    prefixs = torch.arange(0, encoder_outputs_len, device=position_ids.device).repeat(
-                        input_ids.shape[0], 1)
-                    position_ids = torch.cat(
-                        (prefixs, position_ids + encoder_outputs_len), dim=-1)
-                    cache_position = torch.cat((torch.arange(
-                        0, encoder_outputs_len, device=cache_position.device), cache_position + encoder_outputs_len))
+                    if position_ids is not None:
+                        prefixs = torch.arange(0, encoder_outputs_len, device=position_ids.device).repeat(
+                            input_ids.shape[0], 1)
+                        position_ids = torch.cat(
+                            (prefixs, position_ids + encoder_outputs_len), dim=-1)
+                        cache_position = torch.cat((torch.arange(
+                            0, encoder_outputs_len, device=cache_position.device), cache_position + encoder_outputs_len))
         else:
             raise NotImplementedError(
                 "Passing input embeddings is currently not supported for this model"
@@ -2433,6 +2434,8 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
         )
 
         hidden_states = outputs[0]
+        # In fact, the prepended encoder and instruction embedding does not need to be passed
+        # into the LM head, but kept for simplicity
         logits = self.lm_head(hidden_states)
         logits = logits.float()
 
@@ -2458,7 +2461,8 @@ class AudioMistralForCausalLM(AudioMistralPreTrainedModel):
 
         return CausalAudioLMOutputWithPast(
             loss=loss,
-            logits=logits,
+            # Remove the prepended audio embedding
+            logits=logits[..., encoder_outputs_len:, :],
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
