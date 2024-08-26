@@ -332,17 +332,26 @@ class ResidualAttentionBlock(nn.Module):
         x: Tensor,
         xa: Optional[Tensor] = None,
         mask: Optional[Tensor] = None,
+        xa_mask: Optional[Tensor] = None,
         kv_cache: Optional[dict] = None,
     ):
         x = x + self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0]
         if self.cross_attn:
-            x = x + self.cross_attn(self.cross_attn_ln(x),
-                                    xa, kv_cache=kv_cache)[0]
+            x = x + self.cross_attn(
+                self.cross_attn_ln(x),
+                xa=xa,
+                mask=xa_mask,
+                kv_cache=kv_cache,
+            )[0]
         x = x + self.mlp(self.mlp_ln(x))
         return x
-    
-    
+
+
 class TextEncoder(nn.Module):
+    """
+    A multi-layer transformer encoder with an embedding layer.
+    """
+
     def __init__(
             self,
             vocab_size: int,
@@ -351,12 +360,17 @@ class TextEncoder(nn.Module):
             n_head: int,
             n_layer: int,
             output_dim: int = 512,
+            use_position: bool = False,
             **kwargs
     ):
         super().__init__()
 
         self.embed = nn.Embedding(vocab_size, n_state)
-        self.register_buffer("positional_embedding", sinusoids(n_ctx, n_state))
+        if use_position:
+            self.register_buffer("positional_embedding",
+                                 sinusoids(n_ctx, n_state))
+        else:
+            self.positional_embedding = None
         self.blocks: Iterable[ResidualAttentionBlock] = nn.ModuleList(
             [ResidualAttentionBlock(n_state, n_head) for _ in range(n_layer)]
         )
@@ -365,25 +379,28 @@ class TextEncoder(nn.Module):
         self.proj = nn.Linear(n_state, output_dim)
         self.output_dim = output_dim
         self.n_head = n_head
-        
-        
-    def forward(self, x: Tensor, padding_mask: Tensor = None):
+
+    def forward(
+        self,
+        x: Tensor,
+        padding_mask: Tensor = None,
+    ):
         """
         x : torch.Tensor, shape = (batch_size, input_len)
             the input_ids of the text
         """
-        x = x.to(dtype=self.proj.weight.dtype,
-                 device=self.proj.weight.device)
-        x = self.embed(x)
-        x = x.permute(0, 2, 1)  # B, L, D
+        x = x.to(device=self.proj.weight.device)
+        x = self.embed(x)  # B, L, D
         bsz = x.size(0)
         src_len = x.size(1)
 
-        self.input_positional_embedding = self.positional_embedding[:src_len]
-        assert x.shape[1:
-                       ] == self.input_positional_embedding.shape, f"incorrect shape: {x.shape[1:], self.input_positional_embedding.shape}"
-        x = (x + self.input_positional_embedding).to(x.dtype)
+        if self.positional_embedding is not None:
+            self.input_positional_embedding = self.positional_embedding[:src_len]
+            assert x.shape[1:
+                           ] == self.input_positional_embedding.shape, f"incorrect shape: {x.shape[1:], self.input_positional_embedding.shape}"
+            x = (x + self.input_positional_embedding).to(x.dtype)
         if padding_mask is not None:
+            # 1 means masks will be applied
             padding_mask = padding_mask.to(dtype=self.proj.weight.dtype,
                                            device=self.proj.weight.device)
             batch_src_len = padding_mask.size(1)
@@ -406,7 +423,98 @@ class TextEncoder(nn.Module):
 
         x = self.ln_post(x)
         x = self.proj(x)
-        
+
+        return x
+
+
+class AudioJoiner(nn.Module):
+    """
+    A transformer decoder with cross attention.
+    """
+
+    def __init__(
+            self,
+            n_ctx: int,
+            n_state: int,
+            n_head: int,
+            n_layer: int,
+            output_dim: int = 512,
+            use_position: bool = True,
+            **kwargs
+    ):
+        super().__init__()
+
+        if use_position:
+            self.register_buffer("positional_embedding",
+                                 sinusoids(n_ctx, n_state))
+        else:
+            self.positional_embedding = None
+        self.blocks: Iterable[ResidualAttentionBlock] = nn.ModuleList(
+            [ResidualAttentionBlock(n_state, n_head, True)
+             for _ in range(n_layer)]
+        )
+        self.ln_post = LayerNorm(n_state)
+
+        self.down_proj = nn.Linear(output_dim, n_state) if output_dim != n_state else nn.Identity()
+        self.proj = nn.Linear(n_state, output_dim)
+        self.output_dim = output_dim
+        self.n_head = n_head
+
+    def forward(
+        self,
+        x: Tensor,
+        xa: Tensor,
+        padding_mask: Tensor = None,
+        xa_mask: Optional[Tensor] = None,
+    ):
+        """
+        x : torch.Tensor, shape = (batch_size, input_len, output_dim)
+            the audio features
+        xa: torch.Tensor, shape = (batch_size, input_len, n_state)
+            the text features
+        """
+        x = x.to(dtype=self.proj.weight.dtype,
+                 device=self.proj.weight.device)
+        # Down project the audio features
+        x = self.down_proj(x)
+        bsz = x.size(0)
+        src_len = x.size(1)
+
+        if self.positional_embedding is not None:
+            self.input_positional_embedding = self.positional_embedding[:src_len]
+            assert x.shape[1:
+                           ] == self.input_positional_embedding.shape, f"incorrect shape: {x.shape[1:], self.input_positional_embedding.shape}"
+            x = (x + self.input_positional_embedding).to(x.dtype)
+
+        if xa_mask is not None:
+            xa_mask = xa_mask.to(dtype=self.proj.weight.dtype,
+                                 device=self.proj.weight.device)
+            batch_src_len = xa_mask.size(1)
+            xa = xa[:, :batch_src_len, :]
+            xa_mask = xa_mask.view(
+                bsz, -1, batch_src_len
+            )
+            xa_mask_ = xa_mask.all(1)
+            xa[xa_mask_] = 0
+            xa_key_padding_mask = xa_mask_.view(bsz, 1, 1, batch_src_len). \
+                expand(-1, self.n_head, -1, -1).reshape(bsz,
+                                                        self.n_head, 1, batch_src_len)
+            new_xa_mask = torch.zeros_like(
+                xa_key_padding_mask, dtype=x.dtype)
+            xa_mask = new_xa_mask.masked_fill(
+                xa_key_padding_mask, float("-inf"))
+
+        for block in self.blocks:
+            x = block(
+                x=x,
+                xa=xa,
+                mask=padding_mask,
+                xa_mask=xa_mask,
+            )
+
+        x = self.ln_post(x)
+        x = self.proj(x)
+
         return x
 
 
@@ -445,11 +553,22 @@ class AudioEncoder(nn.Module):
             self.audio_bos_eos_token = None
         self.output_dim = output_dim
         self.n_head = n_head
+        self.text_encoder = TextEncoder(**kwargs['text_encoder'])
+        self.joiner = AudioJoiner(**kwargs['joiner'])
 
-    def forward(self, x: Tensor, padding_mask: Tensor = None, audio_lengths: Tensor = None):
+    def forward(
+        self,
+        x: Tensor,
+        padding_mask: Tensor = None,
+        audio_lengths: Tensor = None,
+        audio_input_ids: Tensor = None,
+        audio_input_attention_mask: Tensor = None,
+    ):
         """
         x : torch.Tensor, shape = (batch_size, n_mels, n_ctx)
             the mel spectrogram of the audio
+        audio_input_ids : torch.Tensor, shape = (batch_size, audio_input_len)
+            the audio_input_ids of the contexts
         """
         x = x.to(dtype=self.conv1.weight.dtype,
                  device=self.conv1.weight.device)
@@ -496,6 +615,20 @@ class AudioEncoder(nn.Module):
         x = self.ln_post(x)
         x = self.proj(x)
 
+        # Encode the input_ids
+        audio_input_ids = audio_input_ids.to(device=self.conv1.weight.device)
+        xa = self.text_encoder(
+            x=audio_input_ids,
+            padding_mask=audio_input_attention_mask,
+        )
+        if self.avg_pooler:
+            # Average pooling essentially makes every embedding contain information
+            x = x + self.joiner(x=x, xa=xa,
+                                xa_mask=audio_input_attention_mask,)
+        else:
+            x = x + self.joiner(x=x, xa=xa, padding_mask=padding_mask,
+                                xa_mask=audio_input_attention_mask,)
+
         if self.audio_bos_eos_token is not None:
             bos = self.audio_bos_eos_token.weight[0][None, :]
             eos = self.audio_bos_eos_token.weight[1][None, :]
@@ -503,14 +636,27 @@ class AudioEncoder(nn.Module):
             bos, eos = None, None
         return x, bos, eos
 
-    def encode(self, input_audios: Tensor, input_audio_lengths: Tensor, audio_span_tokens: List):
+    def encode(
+        self,
+        input_audios: Tensor,
+        input_audio_lengths: Tensor,
+        audio_span_tokens: List,
+        audio_input_ids: Tensor = None,
+        audio_input_attention_mask: Tensor = None,
+    ):
         real_input_audio_lens = input_audio_lengths[:, 0].tolist()
         max_len_in_batch = max(real_input_audio_lens)
         padding_mask = torch.ones([input_audios.size(0), max_len_in_batch]).to(dtype=self.conv1.weight.dtype,
                                                                                device=self.conv1.weight.device)
         for index in range(len(input_audios)):
             padding_mask[index, :input_audio_lengths[index][0].item()] = 0
-        x, bos, eos = self(input_audios, padding_mask, input_audio_lengths)
+        x, bos, eos = self(
+            input_audios,
+            padding_mask,
+            input_audio_lengths,
+            audio_input_ids=audio_input_ids,
+            audio_input_attention_mask=audio_input_attention_mask,
+        )
         output_audios = []
         for i in range(len(audio_span_tokens)):
             audio_span = audio_span_tokens[i]
