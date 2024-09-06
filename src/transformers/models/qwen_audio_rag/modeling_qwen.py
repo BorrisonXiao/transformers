@@ -1282,7 +1282,18 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         ))
         input_ids = torch.tensor([context_tokens]).to(self.device)
         kwargs['audio_info'] = audio_info
-        # TODO: Add the CV processing code here and pass it to kwargs
+
+        audio_input_tokenizer = kwargs.pop('audio_input_tokenizer', None)
+        audio_input_context = kwargs.pop('audio_input_context', None)
+        tokenized = audio_input_tokenizer(
+            audio_input_context, add_special_tokens=False, return_tensors="pt")
+        audio_input_ids = tokenized['input_ids']
+        audio_input_masks = tokenized['attention_mask']
+        # For the QWen model, 1 means masks will be applied
+        audio_input_masks = ~audio_input_masks.to(dtype=torch.bool)
+        kwargs['audio_input_ids'] = audio_input_ids
+        kwargs['audio_input_attention_mask'] = audio_input_masks
+
         outputs = self.generate(
             input_ids,
             stop_words_ids=stop_words_ids,

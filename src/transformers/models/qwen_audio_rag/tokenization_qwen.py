@@ -102,7 +102,7 @@ def _replace_closed_tag(
         tag_idx = start_tags.index(input_tokens[start])
         end = _list_find(input_tokens, (end_tags[tag_idx],), start)
         if end == -1:
-            raise ValueError("Unclosed audio token")
+            raise ValueError(f"Unclosed audio token\n{input_tokens}")
         output_tokens.extend(inclusive_replace_func(input_tokens[start: end + 1], audio_info, audio_idx))
         end += 1
         audio_idx += 1

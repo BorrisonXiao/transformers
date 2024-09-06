@@ -622,12 +622,10 @@ class AudioEncoder(nn.Module):
             padding_mask=audio_input_attention_mask,
         )
         if self.avg_pooler:
-            # Average pooling essentially makes every embedding contain information
-            x = x + self.joiner(x=x, xa=xa,
-                                xa_mask=audio_input_attention_mask,)
+            # Keep padding embeddings for self-attention doesn't seem to be a very bad idea
+            x = x + self.joiner(x=x, xa=xa,xa_mask=audio_input_attention_mask,)
         else:
-            x = x + self.joiner(x=x, xa=xa, padding_mask=padding_mask,
-                                xa_mask=audio_input_attention_mask,)
+            x = x + self.joiner(x=x, xa=xa, padding_mask=padding_mask,xa_mask=audio_input_attention_mask,)
 
         if self.audio_bos_eos_token is not None:
             bos = self.audio_bos_eos_token.weight[0][None, :]
