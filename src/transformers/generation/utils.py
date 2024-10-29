@@ -2341,7 +2341,7 @@ class GenerationMixin:
             outputs = self(
                 **model_inputs,
                 return_dict=True,
-                output_attentions=output_attentions,
+                output_attentions=True, # Debugging
                 output_hidden_states=output_hidden_states,
             )
 

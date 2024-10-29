@@ -3,6 +3,7 @@
 # -*- coding: utf-8 -*-
 
 from transformers import Seq2SeqTrainer
+import copy
 from typing import Dict, List, Optional
 import torch
 from functools import partial
@@ -41,6 +42,7 @@ from .utils import (
 from .modeling_utils import unwrap_model
 from .models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
 from transformers.feature_extraction_utils import BatchFeature
+from transformers.models.whisper_st.tokenization_whisper import TASK_IDS, TO_LANGUAGE_CODE
 
 logger = logging.get_logger(__name__)
 
@@ -90,7 +92,7 @@ def _schedule_dynamic_mtl_weight(
 
     x = np.random.beta(min_weight, max_weight)
     return x
-    
+
     # # Ensure x is within the range [c, d]
     # x = max(c, min(d, current_step))
 
@@ -146,9 +148,12 @@ class WhisperTrainer(Seq2SeqTrainer):
                 promptless_prob = self.min_promptless_prob + \
                     (self.max_promptless_prob - self.min_promptless_prob) * \
                     (current_step - 1) / max_steps
-                self.promptless_prob = promptless_prob
+            else:
+                promptless_train = False
 
             # The ASR hyp generation is only applied if the max_sample_prob is greater than 0.0
+            # BUG: Currently the logic is a bit messed up, the promptless + ref-promtped training
+            # is not supported as the following code won't execute if max_sample_prob is 0.0
             if self.max_sample_prob > 0.0:
                 warmup_steps = self.args.warmup_steps
                 current_step = self.state.global_step + 1
@@ -167,7 +172,7 @@ class WhisperTrainer(Seq2SeqTrainer):
                         # Generate the ASR hypotheses and replace the ASR reference with the generated hypotheses
                         model.eval()
                         use_asr_hyp_train = True
-                        
+
                         with torch.no_grad():
                             src_lang = self.src_lang
                             task = "transcribe"
@@ -207,11 +212,12 @@ class WhisperTrainer(Seq2SeqTrainer):
                 # Note that the first <|endoftext|> token should not be ignored, otherwise the model will not
                 # learn to terminate the generation.
                 if not use_asr_hyp_train:
+                    # TODO: Fix this so that the MT/ASR/ST mixed training is supported
                     max_tgt_len = inputs['labels_tgt'].shape[1]
                     # Truncate the ASR transcript so that the new supervision's does not exceed the max length
                     _asr_tokens = inputs['labels_src']
                     _asr_tokens = _asr_tokens[:, :440 - max_tgt_len]
-                    
+
                     asr_texts = self.tokenizer.tokenizer.batch_decode(
                         _asr_tokens, skip_special_tokens=True)
                 else:
@@ -228,7 +234,7 @@ class WhisperTrainer(Seq2SeqTrainer):
                 labels = [{"input_ids": _label[1:]} for _label in _labels]
                 # decoder_input_ids are _labels[:-1]
                 decoder_input_ids = [{"input_ids": _label[:-1]}
-                                    for _label in _labels]
+                                     for _label in _labels]
                 # Pad the labels and decoder_input_ids to the same length
                 labels = self.tokenizer.tokenizer.pad(
                     labels, return_tensors="pt")
@@ -245,14 +251,15 @@ class WhisperTrainer(Seq2SeqTrainer):
                 sos_id = self.tokenizer.tokenizer.convert_tokens_to_ids(
                     "<|startoftranscript|>")
                 decoder_loss_mask = torch.ones_like(labels)
-                for i, seq in enumerate(labels):
-                    for j, label in enumerate(seq):
-                        if label != sos_id:
-                            decoder_loss_mask[i, j] = 0
-                        else:
-                            # Disallow BP on the <|startoftranscript|> token
-                            decoder_loss_mask[i, j] = 0
-                            break
+                if self.mask_labels_src:
+                    for i, seq in enumerate(labels):
+                        for j, label in enumerate(seq):
+                            if label != sos_id:
+                                decoder_loss_mask[i, j] = 0
+                            else:
+                                # Disallow BP on the <|startoftranscript|> token
+                                decoder_loss_mask[i, j] = 0
+                                break
                 inputs_st['decoder_loss_mask'] = decoder_loss_mask.to(bool)
             inputs_st = BatchFeature(inputs_st)
             inputs_st = self._prepare_inputs(inputs_st)
@@ -279,8 +286,13 @@ class WhisperTrainer(Seq2SeqTrainer):
             else:
                 alpha = self.min_alpha
             if self.use_asr_prompt:
-                loss_asr, outputs_asr = self.compute_loss(
-                    model, inputs_asr, return_outputs=True)
+                # TODO: Fix this so that the MT/ASR/ST mixed training is supported
+                # Skip this operation if ASR loss weight is 0.0
+                if alpha < 1.0:
+                    loss_asr, outputs_asr = self.compute_loss(
+                        model, inputs_asr, return_outputs=True)
+                else:
+                    loss_asr = 0.0
                 # # Re-use encoder_last_state to speed up training
                 # inputs_st['encoder_outputs'] = (
                 #     outputs_asr['encoder_last_hidden_state'])
@@ -312,7 +324,8 @@ class WhisperTrainer(Seq2SeqTrainer):
             labels = inputs.pop("labels")
         else:
             labels = None
-        outputs = model(**inputs)
+        with torch.cuda.amp.autocast(cache_enabled=False):
+            outputs = model(**inputs)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
@@ -338,6 +351,7 @@ class WhisperTrainer(Seq2SeqTrainer):
         self,
         *args,
         use_asr_prompt: bool = False,
+        use_asr_prompt_dev: bool = False,
         min_promptless_prob: Optional[float] = 0.0,
         max_promptless_prob: Optional[float] = 0.0,
         min_sample_prob: Optional[float] = 0.0,
@@ -348,6 +362,7 @@ class WhisperTrainer(Seq2SeqTrainer):
         max_alpha: Optional[float] = 0.5,
         loss_warmup: Optional[int] = -1,
         loss_base: Optional[float] = 0.25,
+        mask_labels_src: Optional[bool] = True,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -357,11 +372,13 @@ class WhisperTrainer(Seq2SeqTrainer):
         self.max_sample_prob = max_sample_prob
         self.src_lang = src_lang
         self.use_asr_prompt = use_asr_prompt
+        self.use_asr_prompt_dev = use_asr_prompt_dev
         self.eval_steps = eval_steps
         self.min_alpha = min_alpha
         self.max_alpha = max_alpha
         self.loss_warmup = self.args.warmup_steps if loss_warmup == -1 else loss_warmup
         self.loss_base = loss_base
+        self.mask_labels_src = mask_labels_src
 
     def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
         if self.control.should_log:
@@ -515,11 +532,20 @@ class WhisperTrainer(Seq2SeqTrainer):
 
         return output.metrics
 
-    def _create_prompted_labels(self, inputs, asr_hyp_texts=None) -> Dict[str, torch.Tensor]:
+    def _create_prompted_labels(
+        self,
+        inputs,
+        asr_hyp_texts=None,
+        padding_side="right",
+        return_labels=True,
+    ) -> Dict[str, torch.Tensor]:
         inputs_st = {}
         inputs_st['input_features'] = inputs['input_features']
 
         startofprev_token = "<|startofprev|>"
+        tokenizer = copy.deepcopy(self.tokenizer.tokenizer)
+        tokenizer.padding_side = padding_side
+        tokenizer.model_max_length = 300  # Max is 448, left some room for the prompt
 
         # Add asr reference prompt to the prefix
         # i.e. <startofprev> [asr_ref] [st_ref]
@@ -532,46 +558,68 @@ class WhisperTrainer(Seq2SeqTrainer):
         # e.g. decoder_input_ids: <|startofprev|> [asr_ref] <|startoftranscript|> [st_ref]
         # Note that the first <|endoftext|> token should not be ignored, otherwise the model will not
         # learn to terminate the generation.
-        asr_texts = self.tokenizer.tokenizer.batch_decode(
+        asr_texts = tokenizer.batch_decode(
             inputs['labels_src'], skip_special_tokens=True) if asr_hyp_texts is None else asr_hyp_texts
-        st_ref_texts = self.tokenizer.tokenizer.batch_decode(
-            inputs['labels_tgt'], skip_special_tokens=False)
-        st_ref_texts = [
-            f"<|startoftranscript|>{_text}" for _text in st_ref_texts]
+        if return_labels:
+            st_ref_texts = tokenizer.batch_decode(
+                inputs['labels_tgt'], skip_special_tokens=False)
+            st_ref_texts = [
+                f"<|startoftranscript|>{_text}" for _text in st_ref_texts]
+        else:
+            st_ref_texts = [f"" for _ in asr_texts]
         prompt_texts = [f"{startofprev_token}{asr_text}{st_ref_text}" for asr_text, st_ref_text in zip(
             asr_texts, st_ref_texts)]
-        _labels = self.tokenizer.tokenizer.batch_encode_plus(
-            prompt_texts, add_special_tokens=False).input_ids
-        # labels are _labels[1:]
-        labels = [{"input_ids": _label[1:]} for _label in _labels]
-        # decoder_input_ids are _labels[:-1]
-        decoder_input_ids = [{"input_ids": _label[:-1]}
-                             for _label in _labels]
-        # Pad the labels and decoder_input_ids to the same length
-        labels = self.tokenizer.tokenizer.pad(
-            labels, return_tensors="pt")
-        decoder_input_ids = self.tokenizer.tokenizer.pad(
+        _labels = tokenizer.batch_encode_plus(
+            prompt_texts,
+            add_special_tokens=False,
+            truncation=True,
+        ).input_ids
+        if return_labels:
+            # labels are _labels[1:]
+            labels = [{"input_ids": _label[1:]} for _label in _labels]
+            # Pad the labels and decoder_input_ids to the same length
+            labels = tokenizer.pad(labels, return_tensors="pt")
+            labels = labels["input_ids"].masked_fill(
+                labels.attention_mask.ne(1), -100)
+            inputs_st['labels'] = labels
+        # decoder_input_ids are _labels[:-1] if return_labels is True
+        # Otherwise, the decoder_input_ids are _labels
+        if return_labels:
+            decoder_input_ids = [{"input_ids": _label[:-1]}
+                                 for _label in _labels]
+        else:
+            decoder_input_ids = [{"input_ids": _label} for _label in _labels]
+        decoder_input_ids = tokenizer.pad(
             decoder_input_ids, return_tensors="pt")
-        labels = labels["input_ids"].masked_fill(
-            labels.attention_mask.ne(1), -100)
+        # Note that no right padding is applied to the labels since they are set to -100 already in the collator
         decoder_input_ids = decoder_input_ids["input_ids"]
-        inputs_st['labels'] = labels
         inputs_st['decoder_input_ids'] = decoder_input_ids
 
-        # Generate the decoder_loss_mask to mask out everything before the <|startoftranscript|> token (inlusive)
-        # when computing the loss
-        sos_id = self.tokenizer.tokenizer.convert_tokens_to_ids(
-            "<|startoftranscript|>")
-        decoder_loss_mask = torch.ones_like(labels)
-        for i, seq in enumerate(labels):
-            for j, label in enumerate(seq):
-                if label != sos_id:
-                    decoder_loss_mask[i, j] = 0
-                else:
-                    # Disallow BP on the <|startoftranscript|> token
-                    decoder_loss_mask[i, j] = 0
-                    break
-        inputs_st['decoder_loss_mask'] = decoder_loss_mask.to(bool)
+        if return_labels:
+            # Generate the decoder_loss_mask to mask out everything before the <|startoftranscript|> token (inlusive)
+            # when computing the loss
+            sos_id = tokenizer.convert_tokens_to_ids(
+                "<|startoftranscript|>")
+            decoder_loss_mask = torch.ones_like(labels)
+            for i, seq in enumerate(labels):
+                for j, label in enumerate(seq):
+                    if label != sos_id:
+                        decoder_loss_mask[i, j] = 0
+                    else:
+                        # Disallow BP on the <|startoftranscript|> token
+                        decoder_loss_mask[i, j] = 0
+                        break
+            # Cihan: Now this seems a bit weird, maybe a better solution is to set the labels directly to -100
+            inputs_st['decoder_loss_mask'] = decoder_loss_mask.to(bool)
+
+        if padding_side == "left":
+            # Add decoder_attention_mask to mask out the left padding
+            decoder_attention_mask = torch.zeros_like(decoder_input_ids)
+            # Replace all non-padding tokens with 1
+            decoder_attention_mask = decoder_attention_mask.masked_fill(
+                decoder_input_ids.ne(tokenizer.pad_token_id), 1)
+            inputs_st['decoder_attention_mask'] = decoder_attention_mask
+
         inputs_st = BatchFeature(inputs_st)
         inputs_st = self._prepare_inputs(inputs_st)
 
@@ -626,7 +674,8 @@ class WhisperTrainer(Seq2SeqTrainer):
                 "synced_gpus") is not None else default_synced_gpus
         )
 
-        use_asr_hyp = hasattr(self, "use_asr_prompt") and self.use_asr_prompt
+        use_asr_hyp = hasattr(
+            self, "use_asr_prompt_dev") and self.use_asr_prompt_dev
 
         if use_asr_hyp:
             has_labels = True
@@ -650,9 +699,11 @@ class WhisperTrainer(Seq2SeqTrainer):
 
         # Generate ASR hypotheses first
         if use_asr_hyp:
+            # TODO: Replace the prompt_ids stuff
             self.model.generate = partial(
                 self.model.generate, language=self.src_lang, task="transcribe")
-            asr_hyps = self.model.generate(**inputs_asr, **gen_kwargs)
+            with torch.cuda.amp.autocast(cache_enabled=False):
+                asr_hyps = self.model.generate(**inputs_asr, **gen_kwargs)
             self.model.generate = partial(
                 self.model.generate, language=self.src_lang, task="translate")
             # TODO: As currently the only way of implementing prompting is through the use of
@@ -691,8 +742,9 @@ class WhisperTrainer(Seq2SeqTrainer):
                 inputs_st["labels"] = inputs["labels_tgt"][i][inputs["labels_tgt"]
                                                               [i] != -100].unsqueeze(0).to(self.args.device)
                 inputs_st = self._prepare_inputs(inputs_st)
-                st_hyp = self.model.generate(
-                    **inputs_st, **gen_kwargs, prompt_ids=prompt_ids)
+                with torch.cuda.amp.autocast(cache_enabled=False):
+                    st_hyp = self.model.generate(
+                        **inputs_st, **gen_kwargs, prompt_ids=prompt_ids)
                 # The generated tokens start after the first <|startoftranscript|> token
                 # i.e. it contains only the translation
                 # Note that the first <|startoftranscript|> token is kept
@@ -705,7 +757,109 @@ class WhisperTrainer(Seq2SeqTrainer):
             generated_tokens = self.tokenizer.tokenizer.pad(
                 _generated_tokens, return_tensors="pt").to(self.args.device)["input_ids"]
         else:
-            generated_tokens = self.model.generate(**inputs, **gen_kwargs)
+            if hasattr(self, "use_asr_prompt") and self.use_asr_prompt:
+                self.model.generate = partial(
+                    self.model.generate, language=self.src_lang, task="translate")
+                # Need to explicitly erase the forced_decoder_ids
+                self.model.config.forced_decoder_ids = None
+                self.model.generation_config.forced_decoder_ids = None
+                # Set the decoder_start_token_ids to a set of ids, i.e. <|startoftranscript|><|language|><|task|><|notimestamps|>
+                startofprev_id = self.tokenizer.tokenizer.convert_tokens_to_ids(
+                    "<|startofprev|>")
+                startoftranscript_id = self.tokenizer.tokenizer.convert_tokens_to_ids(
+                    "<|startoftranscript|>")
+
+                # Get the language token id
+                model.generation_config.language = self.src_lang
+                if model.generation_config.language in model.generation_config.lang_to_id.keys():
+                    language_token = model.generation_config.language
+                elif model.generation_config.language in TO_LANGUAGE_CODE.keys():
+                    language_token = f"<|{TO_LANGUAGE_CODE[model.generation_config.language]}|>"
+                elif model.generation_config.language in TO_LANGUAGE_CODE.values():
+                    language_token = f"<|{model.generation_config.language}|>"
+                else:
+                    is_language_code = len(
+                        model.generation_config.language) == 2
+                    raise ValueError(
+                        f"Unsupported language: {model.generation_config.language}. Language should be one of:"
+                        f" {list(TO_LANGUAGE_CODE.values()) if is_language_code else list(TO_LANGUAGE_CODE.keys())}."
+                    )
+                language_token_id = model.generation_config.lang_to_id[language_token]
+
+                model.generation_config.task = "translate"
+                if model.generation_config.task in TASK_IDS:
+                    task_token_id = model.generation_config.task_to_id[model.generation_config.task]
+                else:
+                    raise ValueError(
+                        f"The `{model.generation_config.task}`task is not supported. The task should be one of `{TASK_IDS}`"
+                    )
+
+                decoder_start_token_ids = [
+                    startoftranscript_id, language_token_id, task_token_id]
+
+                if hasattr(model.generation_config, "no_timestamps_token_id") and not model.generation_config.return_timestamps:
+                    decoder_start_token_ids.append(
+                        model.generation_config.no_timestamps_token_id)
+
+                model.generation_config.decoder_start_token_id = decoder_start_token_ids
+
+                # TODO: This is half-done, since the left padding may cause unexpected behavior
+                # as the model is not trained this way
+                inputs_st = self._create_prompted_labels(
+                    inputs=inputs,
+                    asr_hyp_texts=None,
+                    padding_side="left",
+                    return_labels=False,
+                )
+                with torch.cuda.amp.autocast(cache_enabled=False):
+                    st_hyps = self.model.generate(**inputs_st, **gen_kwargs)
+
+                # startofprev_id = self.tokenizer.tokenizer.convert_tokens_to_ids(
+                #     "<|startofprev|>")
+                # startoftranscript_id = self.tokenizer.tokenizer.convert_tokens_to_ids(
+                #     "<|startoftranscript|>")
+                # st_hyps = []
+                # For MT, use the label_src as the prompt, i.e. things to translate
+                asr_hyp_texts = self.tokenizer.tokenizer.batch_decode(
+                    inputs["labels_src"], skip_special_tokens=True)
+                prompted_inputs = self._create_prompted_labels(
+                    inputs=inputs, asr_hyp_texts=asr_hyp_texts)
+                inputs = prompted_inputs  # A hack
+                has_labels = True
+                # for i, asr_hyp in enumerate(asr_hyp_texts):
+                #     prompt_ids = torch.Tensor([startofprev_id] + self.tokenizer.tokenizer.encode(
+                #         asr_hyp, add_special_tokens=False)).long().to(self.args.device)
+                #     inputs_st = {}
+                #     inputs_st["input_features"] = inputs["input_features"][i].unsqueeze(
+                #         0)
+                #     # Unify the torch datatype to match the model's datatype if model is an instance of DeepSpeedEngine
+                #     if hasattr(self.model, 'get_data_types'):
+                #         inputs['input_features'] = inputs['input_features'].to(
+                #             self.model.get_data_types()[0])
+                #     # Note that the paddings (-100) are removed as the batch size is 1
+                #     inputs_st["labels"] = inputs["labels_tgt"][i][inputs["labels_tgt"]
+                #                                                   [i] != -100].unsqueeze(0).to(self.args.device)
+                #     inputs_st = self._prepare_inputs(inputs_st)
+                #     with torch.cuda.amp.autocast(cache_enabled=False):
+                #         # TODO: Get rid of the prompt_ids and put it as part of the inputs for batching
+                #         st_hyp = self.model.generate(
+                #             **inputs_st, **gen_kwargs, prompt_ids=prompt_ids)
+                #     # The generated tokens start after the first <|startoftranscript|> token
+                #     # i.e. it contains only the translation
+                #     # Note that the first <|startoftranscript|> token is kept
+                #     hyp_start_pos = (st_hyp == startoftranscript_id).nonzero(
+                #         as_tuple=True)[-1][0]
+                #     st_hyps.append(st_hyp[0][hyp_start_pos:])
+
+                _generated_tokens = [{"input_ids": st_hyp}
+                                     for st_hyp in st_hyps]
+                # Pad the tokens to the same length with the padding token
+                generated_tokens = self.tokenizer.tokenizer.pad(
+                    _generated_tokens, return_tensors="pt").to(self.args.device)["input_ids"]
+            else:
+                with torch.cuda.amp.autocast(cache_enabled=False):
+                    generated_tokens = self.model.generate(
+                        **inputs, **gen_kwargs)
 
         # Temporary hack to ensure the generation config is not initialized for each iteration of the evaluation loop
         # TODO: remove this hack when the legacy code that initializes generation_config from a model config is
@@ -727,13 +881,15 @@ class WhisperTrainer(Seq2SeqTrainer):
             if has_labels:
                 with self.compute_loss_context_manager():
                     if use_asr_hyp:
-                        outputs_asr = self.model(**inputs_asr)
+                        with torch.cuda.amp.autocast(cache_enabled=False):
+                            outputs_asr = self.model(**inputs_asr)
 
-                        # TODO: Add loss_asr to the final loss for logging as well
-                        outputs_st = self.model(**prompted_inputs)
+                            # TODO: Add loss_asr to the final loss for logging as well
+                            outputs_st = self.model(**prompted_inputs)
                         outputs = outputs_st
                     else:
-                        outputs = model(**inputs)
+                        with torch.cuda.amp.autocast(cache_enabled=False):
+                            outputs = model(**inputs)
                 if self.label_smoother is not None:
                     # TODO: Currently does not really support label smoothing under use_asr_hyp
                     loss = self.label_smoother(
@@ -847,7 +1003,8 @@ class WhisperTrainer(Seq2SeqTrainer):
         all_inputs = None
         # Will be useful when we have an iterable dataset so don't know its length.
 
-        use_asr_hyp = hasattr(self, "use_asr_prompt") and self.use_asr_prompt
+        use_asr_hyp = hasattr(
+            self, "use_asr_prompt_dev") and self.use_asr_prompt_dev
 
         observed_num_examples = 0
         # Main evaluation loop
