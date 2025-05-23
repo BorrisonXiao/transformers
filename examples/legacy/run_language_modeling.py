@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -19,7 +18,6 @@ Fine-tuning the library models for language modeling on a text file (GPT, GPT-2,
 GPT, GPT-2 and CTRL are fine-tuned using a causal language modeling (CLM) loss. BERT and RoBERTa are fine-tuned
 using a masked language modeling (MLM) loss. XLNet is fine-tuned using a permutation language modeling (PLM) loss.
 """
-
 
 import logging
 import math
@@ -149,7 +147,7 @@ class DataTrainingArguments:
         default=-1,
         metadata={
             "help": (
-                "Optional input sequence length after tokenization."
+                "Optional input sequence length after tokenization. "
                 "The training dataset will be truncated in block of this size for training."
                 "Default to the model max input length for single sentence inputs (take into account special tokens)."
             )
@@ -283,7 +281,7 @@ def main():
 
     if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
         raise ValueError(
-            "BERT and RoBERTa-like models do not have LM heads but masked LM heads. They must be run using the"
+            "BERT and RoBERTa-like models do not have LM heads but masked LM heads. They must be run using the "
             "--mlm flag (masked language modeling)."
         )
 
@@ -359,7 +357,7 @@ def main():
                 logger.info("***** Eval results *****")
                 for key in sorted(result.keys()):
                     logger.info("  %s = %s", key, str(result[key]))
-                    writer.write("%s = %s\n" % (key, str(result[key])))
+                    writer.write("{} = {}\n".format(key, str(result[key])))
 
         results.update(result)
 

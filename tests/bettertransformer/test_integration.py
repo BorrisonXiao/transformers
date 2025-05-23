@@ -1,9 +1,8 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Team Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a clone of the License at
+# You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
@@ -38,7 +37,7 @@ class BetterTransformerIntegrationTest(unittest.TestCase):
 
     def test_transform_and_reverse(self):
         r"""
-        Classic tests to simply check if the conversion has been successfull.
+        Classic tests to simply check if the conversion has been successful.
         """
         model_id = "hf-internal-testing/tiny-random-t5"
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -66,7 +65,7 @@ class BetterTransformerIntegrationTest(unittest.TestCase):
             )
 
             output_from_pretrained = model_reloaded.generate(**inp)
-            self.assertTrue(torch.allclose(output, output_from_pretrained))
+            torch.testing.assert_close(output, output_from_pretrained)
 
     def test_error_save_pretrained(self):
         r"""

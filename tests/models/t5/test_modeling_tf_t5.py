@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2018 Google T5 Authors and HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,7 +45,7 @@ class TFT5ModelTester:
         self.vocab_size = 99
         self.n_positions = 14
         self.hidden_size = 32
-        self.num_hidden_layers = 5
+        self.num_hidden_layers = 2
         self.num_attention_heads = 4
         self.d_ff = 37
         self.relative_attention_num_buckets = 8
@@ -248,7 +247,6 @@ class TFT5ModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_generative_model_classes = (TFT5ForConditionalGeneration,) if is_tf_available() else ()
     pipeline_model_mapping = (
         {
-            "conversational": TFT5ForConditionalGeneration,
             "feature-extraction": TFT5Model,
             "summarization": TFT5ForConditionalGeneration,
             "text2text-generation": TFT5ForConditionalGeneration,
@@ -302,7 +300,7 @@ class TFT5ModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        model = TFT5Model.from_pretrained("t5-small")
+        model = TFT5Model.from_pretrained("google-t5/t5-small")
         self.assertIsNotNone(model)
 
     def test_generate_with_headmasking(self):
@@ -325,7 +323,7 @@ class TFT5EncoderOnlyModelTester:
         # For common tests
         use_attention_mask=True,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         d_ff=37,
         relative_attention_num_buckets=8,
@@ -444,8 +442,8 @@ class TFT5EncoderOnlyModelTest(TFModelTesterMixin, unittest.TestCase):
 class TFT5GenerationIntegrationTests(unittest.TestCase):
     @slow
     def test_greedy_xla_generate_simple(self):
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+        tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
         # two examples with different lengths to confirm that attention masks are operational in XLA
         sentences = [
@@ -471,9 +469,9 @@ class TFT5GenerationIntegrationTests(unittest.TestCase):
         self.assertListEqual(expected_output_string, output_strings_xla)
 
     @slow
-    def test_greedy_generate(self):
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+    def test_t5_greedy_generate(self):
+        model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+        tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
         sentences = ["Yesterday, my name was", "Today is a beautiful day and"]
         input_ids = tokenizer(sentences, return_tensors="tf", padding=True).input_ids
@@ -501,8 +499,8 @@ class TFT5GenerationIntegrationTests(unittest.TestCase):
 
         # forces the generation to happen on CPU, to avoid GPU-related quirks
         with tf.device(":/CPU:0"):
-            model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-            tokenizer = T5Tokenizer.from_pretrained("t5-small")
+            model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+            tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
             sentence = "Translate English to German: I have two bananas"
             input_ids = tokenizer(sentence, return_tensors="tf", padding=True).input_ids
@@ -521,9 +519,9 @@ class TFT5GenerationIntegrationTests(unittest.TestCase):
             self.assertListEqual(expected_output_string_xla, output_strings_xla)
 
     @slow
-    def test_sample_generate(self):
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+    def test_t5_sample_generate(self):
+        model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+        tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
         sentences = ["I really love my", "Translate English to German: the transformers are truly amazing"]
         input_ids = tokenizer(sentences, return_tensors="tf", padding=True).input_ids
@@ -549,10 +547,12 @@ class TFT5GenerationIntegrationTests(unittest.TestCase):
 
         self.assertListEqual(expected_output_string, output_strings)
 
+    # TODO (ydshieh): undo skip once a fix is done on TF side.
+    @unittest.skip("Skip for now as TF 2.13 breaks it on GPU")
     @slow
     def test_beam_search_xla_generate_simple(self):
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+        tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
         # tests XLA with task specific arguments
         task_specific_config = getattr(model.config, "task_specific_params", {})
@@ -584,8 +584,8 @@ class TFT5GenerationIntegrationTests(unittest.TestCase):
 
     @slow
     def test_beam_search_generate(self):
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+        tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
         sentences = ["I really love my", "Translate English to German: the transformers are truly amazing"]
         input_ids = tokenizer(sentences, return_tensors="tf", padding=True).input_ids
@@ -612,12 +612,12 @@ class TFT5GenerationIntegrationTests(unittest.TestCase):
 class TFT5ModelIntegrationTests(unittest.TestCase):
     @cached_property
     def model(self):
-        return TFT5ForConditionalGeneration.from_pretrained("t5-base")
+        return TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-base")
 
     @slow
     def test_small_integration_test(self):
         """
-        For comparision run:
+        For comparison run:
         >>> import t5  # pip install t5==0.7.1
         >>> from t5.data.sentencepiece_vocabulary import SentencePieceVocabulary
 
@@ -628,8 +628,8 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
         >>> score = t5_model.score(inputs=["Hello there"], targets=["Hi I am"], vocabulary=vocab)
         """
 
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        model = TFT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
+        tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-small")
 
         input_ids = tokenizer("Hello there", return_tensors="tf").input_ids
         labels = tokenizer("Hi I am", return_tensors="tf").input_ids
@@ -643,7 +643,7 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
     @slow
     def test_small_v1_1_integration_test(self):
         """
-        For comparision run:
+        For comparison run:
         >>> import t5  # pip install t5==0.7.1
         >>> from t5.data.sentencepiece_vocabulary import SentencePieceVocabulary
 
@@ -669,7 +669,7 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
     @slow
     def test_small_byt5_integration_test(self):
         """
-        For comparision run:
+        For comparison run:
         >>> import t5  # pip install t5==0.9.1
 
         >>> path_to_byt5_small_checkpoint = '<fill_in>'
@@ -693,7 +693,7 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
     @slow
     def test_summarization(self):
         model = self.model
-        tok = T5Tokenizer.from_pretrained("t5-base")
+        tok = T5Tokenizer.from_pretrained("google-t5/t5-base")
 
         FRANCE_ARTICLE = (  # @noqa
             "Marseille, France (CNN)The French prosecutor leading an investigation into the crash of Germanwings"
@@ -938,7 +938,7 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
 
     @slow
     def test_translation_en_to_de(self):
-        tok = T5Tokenizer.from_pretrained("t5-base")
+        tok = T5Tokenizer.from_pretrained("google-t5/t5-base")
         model = self.model
 
         task_specific_config = getattr(model.config, "task_specific_params", {})
@@ -968,7 +968,7 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
     @slow
     def test_translation_en_to_fr(self):
         model = self.model
-        tok = T5Tokenizer.from_pretrained("t5-base")
+        tok = T5Tokenizer.from_pretrained("google-t5/t5-base")
 
         task_specific_config = getattr(model.config, "task_specific_params", {})
         translation_config = task_specific_config.get("translation_en_to_fr", {})
@@ -1005,7 +1005,7 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
     @slow
     def test_translation_en_to_ro(self):
         model = self.model
-        tok = T5Tokenizer.from_pretrained("t5-base")
+        tok = T5Tokenizer.from_pretrained("google-t5/t5-base")
 
         task_specific_config = getattr(model.config, "task_specific_params", {})
         translation_config = task_specific_config.get("translation_en_to_ro", {})

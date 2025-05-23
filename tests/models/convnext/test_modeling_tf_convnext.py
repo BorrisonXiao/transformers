@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,13 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TensorFlow ConvNext model. """
+"""Testing suite for the TensorFlow ConvNext model."""
 
 from __future__ import annotations
 
 import inspect
 import unittest
-from typing import List, Tuple
 
 from transformers import ConvNextConfig
 from transformers.testing_utils import require_tf, require_vision, slow
@@ -38,7 +36,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ConvNextFeatureExtractor
+    from transformers import ConvNextImageProcessor
 
 
 class TFConvNextModelTester:
@@ -224,7 +222,7 @@ class TFConvNextModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Test
             dict_output = model(dict_inputs, return_dict=True, **additional_kwargs).to_tuple()
 
             def recursive_check(tuple_object, dict_object):
-                if isinstance(tuple_object, (List, Tuple)):
+                if isinstance(tuple_object, (list, tuple)):
                     for tuple_iterable_value, dict_iterable_value in zip(tuple_object, dict_object):
                         recursive_check(tuple_iterable_value, dict_iterable_value)
                 elif tuple_object is None:
@@ -279,18 +277,16 @@ def prepare_img():
 @require_vision
 class TFConvNextModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return (
-            ConvNextFeatureExtractor.from_pretrained("facebook/convnext-tiny-224") if is_vision_available() else None
-        )
+    def default_image_processor(self):
+        return ConvNextImageProcessor.from_pretrained("facebook/convnext-tiny-224") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = TFConvNextForImageClassification.from_pretrained("facebook/convnext-tiny-224")
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="tf")
+        inputs = image_processor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(**inputs)

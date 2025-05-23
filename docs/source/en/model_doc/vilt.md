@@ -16,6 +16,10 @@ rendered properly in your Markdown viewer.
 
 # ViLT
 
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
+
 ## Overview
 
 The ViLT model was proposed in [ViLT: Vision-and-Language Transformer Without Convolution or Region Supervision](https://arxiv.org/abs/2102.03334)
@@ -34,18 +38,6 @@ Vision-and-Language Transformer (ViLT), monolithic in the sense that the process
 simplified to just the same convolution-free manner that we process textual inputs. We show that ViLT is up to tens of
 times faster than previous VLP models, yet with competitive or better downstream task performance.*
 
-Tips:
-
-- The quickest way to get started with ViLT is by checking the [example notebooks](https://github.com/NielsRogge/Transformers-Tutorials/tree/master/ViLT)
-  (which showcase both inference and fine-tuning on custom data).
-- ViLT is a model that takes both `pixel_values` and `input_ids` as input. One can use [`ViltProcessor`] to prepare data for the model.
-  This processor wraps a feature extractor (for the image modality) and a tokenizer (for the language modality) into one.
-- ViLT is trained with images of various sizes: the authors resize the shorter edge of input images to 384 and limit the longer edge to
-  under 640 while preserving the aspect ratio. To make batching of images possible, the authors use a `pixel_mask` that indicates
-  which pixel values are real and which are padding. [`ViltProcessor`] automatically creates this for you.
-- The design of ViLT is very similar to that of a standard Vision Transformer (ViT). The only difference is that the model includes
-  additional embedding layers for the language modality.
-
 <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/vilt_architecture.jpg"
 alt="drawing" width="600"/>
 
@@ -53,9 +45,17 @@ alt="drawing" width="600"/>
 
 This model was contributed by [nielsr](https://huggingface.co/nielsr). The original code can be found [here](https://github.com/dandelin/ViLT).
 
+## Usage tips
 
-Tips:
-
+- The quickest way to get started with ViLT is by checking the [example notebooks](https://github.com/NielsRogge/Transformers-Tutorials/tree/master/ViLT)
+  (which showcase both inference and fine-tuning on custom data).
+- ViLT is a model that takes both `pixel_values` and `input_ids` as input. One can use [`ViltProcessor`] to prepare data for the model.
+  This processor wraps a image processor (for the image modality) and a tokenizer (for the language modality) into one.
+- ViLT is trained with images of various sizes: the authors resize the shorter edge of input images to 384 and limit the longer edge to
+  under 640 while preserving the aspect ratio. To make batching of images possible, the authors use a `pixel_mask` that indicates
+  which pixel values are real and which are padding. [`ViltProcessor`] automatically creates this for you.
+- The design of ViLT is very similar to that of a standard Vision Transformer (ViT). The only difference is that the model includes
+  additional embedding layers for the language modality.
 - The PyTorch version of this model is only available in torch 1.10 and higher.
 
 ## ViltConfig
@@ -70,6 +70,11 @@ Tips:
 ## ViltImageProcessor
 
 [[autodoc]] ViltImageProcessor
+    - preprocess
+
+## ViltImageProcessorFast
+
+[[autodoc]] ViltImageProcessorFast
     - preprocess
 
 ## ViltProcessor

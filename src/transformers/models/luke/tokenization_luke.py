@@ -53,25 +53,6 @@ VOCAB_FILES_NAMES = {
     "entity_vocab_file": "entity_vocab.json",
 }
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "studio-ousia/luke-base": "https://huggingface.co/studio-ousia/luke-base/resolve/main/vocab.json",
-        "studio-ousia/luke-large": "https://huggingface.co/studio-ousia/luke-large/resolve/main/vocab.json",
-    },
-    "merges_file": {
-        "studio-ousia/luke-base": "https://huggingface.co/studio-ousia/luke-base/resolve/main/merges.txt",
-        "studio-ousia/luke-large": "https://huggingface.co/studio-ousia/luke-large/resolve/main/merges.txt",
-    },
-    "entity_vocab_file": {
-        "studio-ousia/luke-base": "https://huggingface.co/studio-ousia/luke-base/resolve/main/entity_vocab.json",
-        "studio-ousia/luke-large": "https://huggingface.co/studio-ousia/luke-large/resolve/main/entity_vocab.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "studio-ousia/luke-base": 512,
-    "studio-ousia/luke-large": 512,
-}
 
 ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
             return_token_type_ids (`bool`, *optional*):
@@ -287,8 +268,6 @@ class LukeTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -325,28 +304,6 @@ class LukeTokenizer(PreTrainedTokenizer):
 
         # Mask token behave like a normal word, i.e. include the space before it
         mask_token = AddedToken(mask_token, lstrip=True, rstrip=False) if isinstance(mask_token, str) else mask_token
-
-        super().__init__(
-            errors=errors,
-            bos_token=bos_token,
-            eos_token=eos_token,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            cls_token=cls_token,
-            pad_token=pad_token,
-            mask_token=mask_token,
-            add_prefix_space=add_prefix_space,
-            task=task,
-            max_entity_length=32,
-            max_mention_length=30,
-            entity_token_1="<ent>",
-            entity_token_2="<ent2>",
-            entity_unk_token=entity_unk_token,
-            entity_pad_token=entity_pad_token,
-            entity_mask_token=entity_mask_token,
-            entity_mask2_token=entity_mask2_token,
-            **kwargs,
-        )
 
         with open(vocab_file, encoding="utf-8") as vocab_handle:
             self.encoder = json.load(vocab_handle)
@@ -407,6 +364,28 @@ class LukeTokenizer(PreTrainedTokenizer):
 
         self.max_mention_length = max_mention_length
 
+        super().__init__(
+            errors=errors,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            cls_token=cls_token,
+            pad_token=pad_token,
+            mask_token=mask_token,
+            add_prefix_space=add_prefix_space,
+            task=task,
+            max_entity_length=32,
+            max_mention_length=30,
+            entity_token_1="<ent>",
+            entity_token_2="<ent2>",
+            entity_unk_token=entity_unk_token,
+            entity_pad_token=entity_pad_token,
+            entity_mask_token=entity_mask_token,
+            entity_mask2_token=entity_mask2_token,
+            **kwargs,
+        )
+
     @property
     # Copied from transformers.models.roberta.tokenization_roberta.RobertaTokenizer.vocab_size with Roberta->Luke, RoBERTa->LUKE
     def vocab_size(self):
@@ -414,7 +393,9 @@ class LukeTokenizer(PreTrainedTokenizer):
 
     # Copied from transformers.models.roberta.tokenization_roberta.RobertaTokenizer.get_vocab with Roberta->Luke, RoBERTa->LUKE
     def get_vocab(self):
-        return dict(self.encoder, **self.added_tokens_encoder)
+        vocab = dict(self.encoder).copy()
+        vocab.update(self.added_tokens_encoder)
+        return vocab
 
     # Copied from transformers.models.roberta.tokenization_roberta.RobertaTokenizer.bpe with Roberta->Luke, RoBERTa->LUKE
     def bpe(self, token):
@@ -589,6 +570,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: Optional[bool] = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -681,6 +663,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                 stride=stride,
                 is_split_into_words=is_split_into_words,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_tensors=return_tensors,
                 return_token_type_ids=return_token_type_ids,
                 return_attention_mask=return_attention_mask,
@@ -707,6 +690,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                 stride=stride,
                 is_split_into_words=is_split_into_words,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_tensors=return_tensors,
                 return_token_type_ids=return_token_type_ids,
                 return_attention_mask=return_attention_mask,
@@ -734,6 +718,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: Optional[bool] = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -788,6 +773,7 @@ class LukeTokenizer(PreTrainedTokenizer):
             max_entity_length=max_entity_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             prepend_batch_axis=True,
             return_attention_mask=return_attention_mask,
@@ -815,6 +801,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: Optional[bool] = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -895,6 +882,7 @@ class LukeTokenizer(PreTrainedTokenizer):
             max_entity_length=max_entity_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
             return_token_type_ids=return_token_type_ids,
             return_overflowing_tokens=return_overflowing_tokens,
@@ -908,7 +896,7 @@ class LukeTokenizer(PreTrainedTokenizer):
 
     def _check_entity_input_format(self, entities: Optional[EntityInput], entity_spans: Optional[EntitySpanInput]):
         if not isinstance(entity_spans, list):
-            raise ValueError("entity_spans should be given as a list")
+            raise TypeError("entity_spans should be given as a list")
         elif len(entity_spans) > 0 and not isinstance(entity_spans[0], tuple):
             raise ValueError(
                 "entity_spans should be given as a list of tuples containing the start and end character indices"
@@ -1089,6 +1077,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         max_entity_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[str] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -1131,6 +1120,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 stride=stride,
                 pad_to_multiple_of=None,  # we pad in batch afterward
+                padding_side=None,  # we pad in batch afterward
                 return_attention_mask=False,  # we pad in batch afterward
                 return_token_type_ids=return_token_type_ids,
                 return_overflowing_tokens=return_overflowing_tokens,
@@ -1151,6 +1141,7 @@ class LukeTokenizer(PreTrainedTokenizer):
             padding=padding_strategy.value,
             max_length=max_length,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
         )
 
@@ -1174,6 +1165,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         max_entity_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -1376,6 +1368,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 padding=padding_strategy.value,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
 
@@ -1401,6 +1394,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         max_entity_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_attention_mask: Optional[bool] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         verbose: bool = True,
@@ -1437,6 +1431,9 @@ class LukeTokenizer(PreTrainedTokenizer):
             pad_to_multiple_of (`int`, *optional*):
                 If set will pad the sequence to a multiple of the provided value. This is especially useful to enable
                 the use of Tensor Cores on NVIDIA hardware with compute capability `>= 7.5` (Volta).
+            padding_side:
+                The side on which the model should have padding applied. Should be selected between ['right', 'left'].
+                Default value is picked from the class attribute of the same name.
             return_attention_mask (`bool`, *optional*):
                 Whether to return the attention mask. If left to the default, will return the attention mask according
                 to the specific tokenizer's default, defined by the `return_outputs` attribute. [What are attention
@@ -1514,6 +1511,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 padding_strategy=padding_strategy,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
             return BatchEncoding(encoded_inputs, tensor_type=return_tensors)
@@ -1538,6 +1536,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 padding_strategy=padding_strategy,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
 
@@ -1555,6 +1554,7 @@ class LukeTokenizer(PreTrainedTokenizer):
         max_entity_length: Optional[int] = None,
         padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_attention_mask: Optional[bool] = None,
     ) -> dict:
         """
@@ -1581,6 +1581,9 @@ class LukeTokenizer(PreTrainedTokenizer):
             pad_to_multiple_of: (optional) Integer if set will pad the sequence to a multiple of the provided value.
                 This is especially useful to enable the use of Tensor Core on NVIDIA hardware with compute capability
                 `>= 7.5` (Volta).
+            padding_side:
+                The side on which the model should have padding applied. Should be selected between ['right', 'left'].
+                Default value is picked from the class attribute of the same name.
             return_attention_mask:
                 (optional) Set to False to avoid returning attention mask (default: set to model specifics)
         """
@@ -1619,9 +1622,10 @@ class LukeTokenizer(PreTrainedTokenizer):
 
         if needs_to_be_padded:
             difference = max_length - len(encoded_inputs["input_ids"])
+            padding_side = padding_side if padding_side is not None else self.padding_side
             if entities_provided:
                 entity_difference = max_entity_length - len(encoded_inputs["entity_ids"])
-            if self.padding_side == "right":
+            if padding_side == "right":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"] + [0] * difference
                     if entities_provided:
@@ -1652,7 +1656,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                             encoded_inputs["entity_end_positions"] + [0] * entity_difference
                         )
 
-            elif self.padding_side == "left":
+            elif padding_side == "left":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = [0] * difference + encoded_inputs["attention_mask"]
                     if entities_provided:
@@ -1683,7 +1687,7 @@ class LukeTokenizer(PreTrainedTokenizer):
                             "entity_end_positions"
                         ]
             else:
-                raise ValueError("Invalid padding strategy:" + str(self.padding_side))
+                raise ValueError("Invalid padding strategy:" + str(padding_side))
 
         return encoded_inputs
 
@@ -1722,3 +1726,6 @@ class LukeTokenizer(PreTrainedTokenizer):
             f.write(json.dumps(self.entity_vocab, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
         return vocab_file, merge_file, entity_vocab_file
+
+
+__all__ = ["LukeTokenizer"]

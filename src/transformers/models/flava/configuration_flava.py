@@ -12,21 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" FLAVA model configurations"""
+"""FLAVA model configurations"""
 
-import copy
-import os
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-FLAVA_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "facebook/flava-full": "https://huggingface.co/facebook/flava-full/resolve/main/config.json",
-}
 
 
 class FlavaImageConfig(PretrainedConfig):
@@ -53,9 +47,9 @@ class FlavaImageConfig(PretrainedConfig):
         hidden_act (`str` or `function`, *optional*, defaults to `"gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
             `"relu"`, `"selu"` and `"gelu_new"` are supported.
-        hidden_dropout_prob (`float`, *optional*, defaults to 0.1):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
-        attention_probs_dropout_prob (`float`, *optional*, defaults to 0.1):
+        hidden_dropout_prob (`float`, *optional*, defaults to 0.0):
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
+        attention_probs_dropout_prob (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
@@ -91,6 +85,7 @@ class FlavaImageConfig(PretrainedConfig):
     ```"""
 
     model_type = "flava_image_model"
+    base_config_key = "image_config"
 
     def __init__(
         self,
@@ -128,24 +123,6 @@ class FlavaImageConfig(PretrainedConfig):
         self.qkv_bias = qkv_bias
         self.mask_token = mask_token
         self.vocab_size = vocab_size
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the image config dict if we are loading from FlavaConfig
-        if config_dict.get("model_type") == "flava":
-            config_dict = config_dict["image_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
 
 
 class FlavaTextConfig(PretrainedConfig):
@@ -189,7 +166,7 @@ class FlavaTextConfig(PretrainedConfig):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
             `"relu"`, `"selu"` and `"gelu_new"` are supported.
         hidden_dropout_prob (`float`, *optional*, defaults to 0.1):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_probs_dropout_prob (`float`, *optional*, defaults to 0.1):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
@@ -219,7 +196,9 @@ class FlavaTextConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "flava_text_model"
+    base_config_key = "text_config"
 
     def __init__(
         self,
@@ -258,24 +237,6 @@ class FlavaTextConfig(PretrainedConfig):
         self.qkv_bias = qkv_bias
         self.pad_token_id = pad_token_id
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the text config dict if we are loading from FlavaConfig
-        if config_dict.get("model_type") == "flava":
-            config_dict = config_dict["text_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
 
 class FlavaMultimodalConfig(PretrainedConfig):
     r"""
@@ -292,7 +253,7 @@ class FlavaMultimodalConfig(PretrainedConfig):
     Args:
         hidden_size (`int`, *optional*, defaults to 768):
             Dimensionality of the encoder layers and the pooler layer.
-        num_hidden_layers (`int`, *optional*, defaults to 12):
+        num_hidden_layers (`int`, *optional*, defaults to 6):
             Number of hidden layers in the Transformer encoder.
         num_attention_heads (`int`, *optional*, defaults to 12):
             Number of attention heads for each attention layer in the Transformer encoder.
@@ -301,9 +262,9 @@ class FlavaMultimodalConfig(PretrainedConfig):
         hidden_act (`str` or `function`, *optional*, defaults to `"gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
             `"relu"`, `"selu"` and `"gelu_new"` are supported.
-        hidden_dropout_prob (`float`, *optional*, defaults to 0.1):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
-        attention_probs_dropout_prob (`float`, *optional*, defaults to 0.1):
+        hidden_dropout_prob (`float`, *optional*, defaults to 0.0):
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
+        attention_probs_dropout_prob (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
@@ -331,6 +292,7 @@ class FlavaMultimodalConfig(PretrainedConfig):
     ```"""
 
     model_type = "flava_multimodal_model"
+    base_config_key = "multimodal_config"
 
     def __init__(
         self,
@@ -361,27 +323,10 @@ class FlavaMultimodalConfig(PretrainedConfig):
         self.qkv_bias = qkv_bias
         self.use_cls_token = use_cls_token
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the multimodal config dict if we are loading from FlavaConfig
-        if config_dict.get("model_type") == "flava":
-            config_dict = config_dict["multimodal_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
 
 class FlavaImageCodebookConfig(PretrainedConfig):
     model_type = "flava_image_codebook"
+    base_config_key = "image_codebook_config"
 
     r"""
     [`FlavaImageCodebookConfig`] is the configuration class to store the configuration of a [`FlavaImageCodebook`]. It
@@ -393,16 +338,16 @@ class FlavaImageCodebookConfig(PretrainedConfig):
     documentation from [`PretrainedConfig`] for more information.
 
     Args:
-        num_groups (`int`, defaults to 4):
+        num_groups (`int`, *optional*, defaults to 4):
             Number of groups to be created. This parameter as of now doesn't affect the model and is used for some
             internal calculation and estimations.
-        input_channels (`int`, defaults to 3):
+        input_channels (`int`, *optional*, defaults to 3):
             Number of channels in the image to be passed.
-        num_blocks_per_group (`int`, defaults to 2):
+        num_blocks_per_group (`int`, *optional*, defaults to 2):
             Number of conv-based blocks per group.
-        hidden_size (`int`, defaults to 256):
+        hidden_size (`int`, *optional*, defaults to 256):
             Size of hidden dim for the blocks.
-        vocab_size (`int`, defaults to 8192):
+        vocab_size (`int`, *optional*, defaults to 8192):
             Size of the output vocabulary for the codebook.
         freeze (`bool`, defaults to `True`):
             Whether to freeze the weights of the model.
@@ -446,24 +391,6 @@ class FlavaImageCodebookConfig(PretrainedConfig):
         self.freeze = freeze
         self.initializer_range = initializer_range
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the image codebook config dict if we are loading from FlavaConfig
-        if config_dict.get("model_type") == "flava":
-            config_dict = config_dict["image_codebook_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
 
 class FlavaConfig(PretrainedConfig):
     r"""
@@ -487,9 +414,9 @@ class FlavaConfig(PretrainedConfig):
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
             The epsilon used by the layer normalization layers.
         projection_dim (`int`, *optional*, defaults to 512):
-            Dimentionality of text and image projection layers.
+            Dimensionality of text and image projection layers.
         logit_scale_init_value (`float`, *optional*, defaults to 2.6592):
-            The inital value of the *logit_scale* paramter. Default is used as per the original FLAVA/CLIP
+            The initial value of the *logit_scale* parameter. Default is used as per the original FLAVA/CLIP
             implementation.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
@@ -536,14 +463,19 @@ class FlavaConfig(PretrainedConfig):
     """
 
     model_type = "flava"
-    is_composition = True
+    sub_configs = {
+        "text_config": FlavaTextConfig,
+        "image_config": FlavaImageConfig,
+        "multimodal_config": FlavaMultimodalConfig,
+        "image_codebook_config": FlavaImageCodebookConfig,
+    }
 
     def __init__(
         self,
-        image_config: Dict[str, Any] = None,
-        text_config: Dict[str, Any] = None,
-        multimodal_config: Dict[str, Any] = None,
-        image_codebook_config: Dict[str, Any] = None,
+        image_config: Optional[Dict[str, Any]] = None,
+        text_config: Optional[Dict[str, Any]] = None,
+        multimodal_config: Optional[Dict[str, Any]] = None,
+        image_codebook_config: Optional[Dict[str, Any]] = None,
         hidden_size: int = 768,
         layer_norm_eps: float = 1e-12,
         projection_dim: int = 768,
@@ -595,9 +527,9 @@ class FlavaConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`text_config_dict` is provided which will be used to initialize `FlavaTextConfig`. The "
-                            f'value `text_config["{key}"]` will be overriden.'
+                            f'value `text_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `text_config` with the ones in `_text_config_dict`.
             text_config.update(_text_config_dict)
@@ -627,9 +559,9 @@ class FlavaConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`image_config_dict` is provided which will be used to initialize `FlavaImageConfig`. "
-                            f'The value `image_config["{key}"]` will be overriden.'
+                            f'The value `image_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `image_config` with the ones in `_image_config_dict`.
             image_config.update(_image_config_dict)
@@ -659,9 +591,9 @@ class FlavaConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`multimodal_config_dict` is provided which will be used to initialize "
-                            f'`FlavaMultimodalConfig`. The value `multimodal_config["{key}"]` will be overriden.'
+                            f'`FlavaMultimodalConfig`. The value `multimodal_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `multimodal_config` with the ones in `_multimodal_config_dict`.
             multimodal_config.update(_multimodal_config_dict)
@@ -692,9 +624,9 @@ class FlavaConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`image_codebook_config_dict` is provided which will be used to initialize "
-                            f'`FlavaImageCodebookConfig`. The value `image_codebook_config["{key}"]` will be overriden.'
+                            f'`FlavaImageCodebookConfig`. The value `image_codebook_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `image_codebook_config` with the ones in `_image_codebook_config_dict`.
             image_codebook_config.update(_image_codebook_config_dict)
@@ -765,17 +697,5 @@ class FlavaConfig(PretrainedConfig):
             **kwargs,
         )
 
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
 
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["image_config"] = self.image_config.to_dict()
-        output["text_config"] = self.text_config.to_dict()
-        output["multimodal_config"] = self.multimodal_config.to_dict()
-        output["image_codebook_config"] = self.image_codebook_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output
+__all__ = ["FlavaConfig", "FlavaImageCodebookConfig", "FlavaImageConfig", "FlavaMultimodalConfig", "FlavaTextConfig"]

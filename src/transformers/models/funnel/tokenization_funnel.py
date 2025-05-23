@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Tokenization class for Funnel Transformer."""
+"""Tokenization class for Funnel Transformer."""
 
 import collections
 import os
@@ -39,31 +39,6 @@ _model_names = [
     "xlarge",
     "xlarge-base",
 ]
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "funnel-transformer/small": "https://huggingface.co/funnel-transformer/small/resolve/main/vocab.txt",
-        "funnel-transformer/small-base": "https://huggingface.co/funnel-transformer/small-base/resolve/main/vocab.txt",
-        "funnel-transformer/medium": "https://huggingface.co/funnel-transformer/medium/resolve/main/vocab.txt",
-        "funnel-transformer/medium-base": (
-            "https://huggingface.co/funnel-transformer/medium-base/resolve/main/vocab.txt"
-        ),
-        "funnel-transformer/intermediate": (
-            "https://huggingface.co/funnel-transformer/intermediate/resolve/main/vocab.txt"
-        ),
-        "funnel-transformer/intermediate-base": (
-            "https://huggingface.co/funnel-transformer/intermediate-base/resolve/main/vocab.txt"
-        ),
-        "funnel-transformer/large": "https://huggingface.co/funnel-transformer/large/resolve/main/vocab.txt",
-        "funnel-transformer/large-base": "https://huggingface.co/funnel-transformer/large-base/resolve/main/vocab.txt",
-        "funnel-transformer/xlarge": "https://huggingface.co/funnel-transformer/xlarge/resolve/main/vocab.txt",
-        "funnel-transformer/xlarge-base": (
-            "https://huggingface.co/funnel-transformer/xlarge-base/resolve/main/vocab.txt"
-        ),
-    }
-}
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {f"funnel-transformer/{name}": 512 for name in _model_names}
-PRETRAINED_INIT_CONFIGURATION = {f"funnel-transformer/{name}": {"do_lower_case": True} for name in _model_names}
 
 
 # Copied from transformers.models.bert.tokenization_bert.load_vocab
@@ -120,9 +95,9 @@ class FunnelTokenizer(PreTrainedTokenizer):
         mask_token (`str`, *optional*, defaults to `"<mask>"`):
             The token used for masking values. This is the token used when training this model with masked language
             modeling. This is the token which the model will try to predict.
-        bos_token (`str`, `optional`, defaults to `"<s>"`):
+        bos_token (`str`, *optional*, defaults to `"<s>"`):
             The beginning of sentence token.
-        eos_token (`str`, `optional`, defaults to `"</s>"`):
+        eos_token (`str`, *optional*, defaults to `"</s>"`):
             The end of sentence token.
         tokenize_chinese_chars (`bool`, *optional*, defaults to `True`):
             Whether or not to tokenize Chinese characters.
@@ -132,12 +107,12 @@ class FunnelTokenizer(PreTrainedTokenizer):
         strip_accents (`bool`, *optional*):
             Whether or not to strip all accents. If this option is not specified, then it will be determined by the
             value for `lowercase` (as in the original BERT).
+        clean_up_tokenization_spaces (`bool`, *optional*, defaults to `True`):
+            Whether or not to cleanup spaces after decoding, cleanup consists in removing potential artifacts like
+            extra spaces.
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    pretrained_init_configuration = PRETRAINED_INIT_CONFIGURATION
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     cls_token_type_id: int = 2
 
     def __init__(
@@ -155,24 +130,9 @@ class FunnelTokenizer(PreTrainedTokenizer):
         eos_token="</s>",
         tokenize_chinese_chars=True,
         strip_accents=None,
+        clean_up_tokenization_spaces=True,
         **kwargs,
     ):
-        super().__init__(
-            do_lower_case=do_lower_case,
-            do_basic_tokenize=do_basic_tokenize,
-            never_split=never_split,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            pad_token=pad_token,
-            cls_token=cls_token,
-            mask_token=mask_token,
-            bos_token=bos_token,
-            eos_token=eos_token,
-            tokenize_chinese_chars=tokenize_chinese_chars,
-            strip_accents=strip_accents,
-            **kwargs,
-        )
-
         if not os.path.isfile(vocab_file):
             raise ValueError(
                 f"Can't find a vocabulary file at path '{vocab_file}'. To load the vocabulary from a Google pretrained"
@@ -188,7 +148,24 @@ class FunnelTokenizer(PreTrainedTokenizer):
                 tokenize_chinese_chars=tokenize_chinese_chars,
                 strip_accents=strip_accents,
             )
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=self.unk_token)
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=str(unk_token))
+
+        super().__init__(
+            do_lower_case=do_lower_case,
+            do_basic_tokenize=do_basic_tokenize,
+            never_split=never_split,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            pad_token=pad_token,
+            cls_token=cls_token,
+            mask_token=mask_token,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            tokenize_chinese_chars=tokenize_chinese_chars,
+            strip_accents=strip_accents,
+            clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+            **kwargs,
+        )
 
     @property
     # Copied from transformers.models.bert.tokenization_bert.BertTokenizer.do_lower_case
@@ -205,10 +182,12 @@ class FunnelTokenizer(PreTrainedTokenizer):
         return dict(self.vocab, **self.added_tokens_encoder)
 
     # Copied from transformers.models.bert.tokenization_bert.BertTokenizer._tokenize
-    def _tokenize(self, text):
+    def _tokenize(self, text, split_special_tokens=False):
         split_tokens = []
         if self.do_basic_tokenize:
-            for token in self.basic_tokenizer.tokenize(text, never_split=self.all_special_tokens):
+            for token in self.basic_tokenizer.tokenize(
+                text, never_split=self.all_special_tokens if not split_special_tokens else None
+            ):
                 # If the token is part of the never_split set
                 if token in self.basic_tokenizer.never_split:
                     split_tokens.append(token)
@@ -341,7 +320,7 @@ class FunnelTokenizer(PreTrainedTokenizer):
 
 
 # Copied from transformers.models.bert.tokenization_bert.BasicTokenizer
-class BasicTokenizer(object):
+class BasicTokenizer:
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -359,20 +338,30 @@ class BasicTokenizer(object):
         strip_accents (`bool`, *optional*):
             Whether or not to strip all accents. If this option is not specified, then it will be determined by the
             value for `lowercase` (as in the original BERT).
+        do_split_on_punc (`bool`, *optional*, defaults to `True`):
+            In some instances we want to skip the basic punctuation splitting so that later tokenization can capture
+            the full context of the words, such as contractions.
     """
 
-    def __init__(self, do_lower_case=True, never_split=None, tokenize_chinese_chars=True, strip_accents=None):
+    def __init__(
+        self,
+        do_lower_case=True,
+        never_split=None,
+        tokenize_chinese_chars=True,
+        strip_accents=None,
+        do_split_on_punc=True,
+    ):
         if never_split is None:
             never_split = []
         self.do_lower_case = do_lower_case
         self.never_split = set(never_split)
         self.tokenize_chinese_chars = tokenize_chinese_chars
         self.strip_accents = strip_accents
+        self.do_split_on_punc = do_split_on_punc
 
     def tokenize(self, text, never_split=None):
         """
-        Basic Tokenization of a piece of text. Split on "white spaces" only, for sub-word tokenization, see
-        WordPieceTokenizer.
+        Basic Tokenization of a piece of text. For sub-word tokenization, see WordPieceTokenizer.
 
         Args:
             never_split (`List[str]`, *optional*)
@@ -391,7 +380,9 @@ class BasicTokenizer(object):
         # words in the English Wikipedia.).
         if self.tokenize_chinese_chars:
             text = self._tokenize_chinese_chars(text)
-        orig_tokens = whitespace_tokenize(text)
+        # prevents treating the same character with different unicode codepoints as different characters
+        unicode_normalized_text = unicodedata.normalize("NFC", text)
+        orig_tokens = whitespace_tokenize(unicode_normalized_text)
         split_tokens = []
         for token in orig_tokens:
             if token not in never_split:
@@ -419,7 +410,7 @@ class BasicTokenizer(object):
 
     def _run_split_on_punc(self, text, never_split=None):
         """Splits punctuation on a piece of text."""
-        if never_split is not None and text in never_split:
+        if not self.do_split_on_punc or (never_split is not None and text in never_split):
             return [text]
         chars = list(text)
         i = 0
@@ -491,7 +482,7 @@ class BasicTokenizer(object):
 
 
 # Copied from transformers.models.bert.tokenization_bert.WordpieceTokenizer
-class WordpieceTokenizer(object):
+class WordpieceTokenizer:
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):
@@ -504,7 +495,7 @@ class WordpieceTokenizer(object):
         Tokenizes a piece of text into its word pieces. This uses a greedy longest-match-first algorithm to perform
         tokenization using the given vocabulary.
 
-        For example, `input = "unaffable"` wil return as output `["un", "##aff", "##able"]`.
+        For example, `input = "unaffable"` will return as output `["un", "##aff", "##able"]`.
 
         Args:
             text: A single token or whitespace separated tokens. This should have
@@ -546,3 +537,6 @@ class WordpieceTokenizer(object):
             else:
                 output_tokens.extend(sub_tokens)
         return output_tokens
+
+
+__all__ = ["FunnelTokenizer"]

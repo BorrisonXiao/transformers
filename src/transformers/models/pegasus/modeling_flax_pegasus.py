@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Flax PEGASUS model."""
-
+"""Flax PEGASUS model."""
 
 import math
 import random
@@ -210,7 +209,7 @@ PEGASUS_DECODE_INPUTS_DOCSTRING = r"""
 
 
 # Copied from transformers.models.bart.modeling_flax_bart.shift_tokens_right
-def shift_tokens_right(input_ids: np.array, pad_token_id: int, decoder_start_token_id: int) -> np.ndarray:
+def shift_tokens_right(input_ids: jnp.ndarray, pad_token_id: int, decoder_start_token_id: int) -> jnp.ndarray:
     """
     Shift input ids one token to the right.
     """
@@ -223,7 +222,7 @@ def shift_tokens_right(input_ids: np.array, pad_token_id: int, decoder_start_tok
 
 
 # Copied from transformers.models.marian.modeling_flax_marian.create_sinusoidal_positions
-def create_sinusoidal_positions(n_pos, dim, dtype):
+def create_sinusoidal_positions(n_pos, dim):
     position_enc = np.array([[pos / np.power(10000, 2 * (j // 2) / dim) for j in range(dim)] for pos in range(n_pos)])
     sentinel = dim // 2 + dim % 2
     out = np.zeros_like(position_enc)
@@ -279,7 +278,7 @@ class FlaxPegasusAttention(nn.Module):
     def _concatenate_to_cache(self, key, value, query, attention_mask):
         """
         This function takes projected key, value states from a single input token and concatenates the states to cached
-        states from previous steps. This function is slighly adapted from the official Flax repository:
+        states from previous steps. This function is slightly adapted from the official Flax repository:
         https://github.com/google/flax/blob/491ce18759622506588784b4fca0e4bf05f8c8cd/flax/linen/attention.py#L252
         """
         # detect if we're initializing by absence of existing cache data.
@@ -686,9 +685,7 @@ class FlaxPegasusEncoder(nn.Module):
         self.max_source_positions = self.config.max_position_embeddings
         self.embed_scale = math.sqrt(embed_dim) if self.config.scale_embedding else 1.0
 
-        self.embed_positions = create_sinusoidal_positions(
-            self.config.max_position_embeddings, embed_dim, dtype=self.dtype
-        )
+        self.embed_positions = create_sinusoidal_positions(self.config.max_position_embeddings, embed_dim)
         self.layers = FlaxPegasusEncoderLayerCollection(self.config, self.dtype)
         self.layer_norm = nn.LayerNorm(dtype=self.dtype, epsilon=1e-05)
 
@@ -709,7 +706,7 @@ class FlaxPegasusEncoder(nn.Module):
 
         # embed positions
         embed_pos = jnp.take(self.embed_positions, position_ids, axis=0)
-        # explictly cast the positions here, since self.embed_positions are not registered as parameters
+        # explicitly cast the positions here, since self.embed_positions are not registered as parameters
         embed_pos = embed_pos.astype(inputs_embeds.dtype)
 
         hidden_states = inputs_embeds + embed_pos
@@ -755,9 +752,7 @@ class FlaxPegasusDecoder(nn.Module):
         self.max_target_positions = self.config.max_position_embeddings
         self.embed_scale = math.sqrt(self.config.d_model) if self.config.scale_embedding else 1.0
 
-        self.embed_positions = create_sinusoidal_positions(
-            self.config.max_position_embeddings, embed_dim, dtype=self.dtype
-        )
+        self.embed_positions = create_sinusoidal_positions(self.config.max_position_embeddings, embed_dim)
 
         self.layers = FlaxPegasusDecoderLayerCollection(self.config, self.dtype)
         self.layer_norm = nn.LayerNorm(dtype=self.dtype, epsilon=1e-05)
@@ -782,7 +777,7 @@ class FlaxPegasusDecoder(nn.Module):
 
         # embed positions
         positions = jnp.take(self.embed_positions, position_ids, axis=0)
-        # explictly cast the positions here, since self.embed_positions are not registered as parameters
+        # explicitly cast the positions here, since self.embed_positions are not registered as parameters
         positions = positions.astype(inputs_embeds.dtype)
 
         hidden_states = inputs_embeds + positions
@@ -993,7 +988,7 @@ class FlaxPegasusPreTrainedModel(FlaxPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         train: bool = False,
-        params: dict = None,
+        params: Optional[dict] = None,
         dropout_rng: PRNGKey = None,
     ):
         r"""
@@ -1054,12 +1049,12 @@ class FlaxPegasusPreTrainedModel(FlaxPreTrainedModel):
         encoder_attention_mask: Optional[jnp.ndarray] = None,
         decoder_attention_mask: Optional[jnp.ndarray] = None,
         decoder_position_ids: Optional[jnp.ndarray] = None,
-        past_key_values: dict = None,
+        past_key_values: Optional[dict] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         train: bool = False,
-        params: dict = None,
+        params: Optional[dict] = None,
         dropout_rng: PRNGKey = None,
     ):
         r"""
@@ -1172,7 +1167,7 @@ class FlaxPegasusPreTrainedModel(FlaxPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         train: bool = False,
-        params: dict = None,
+        params: Optional[dict] = None,
         dropout_rng: PRNGKey = None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1322,12 +1317,12 @@ class FlaxPegasusForConditionalGeneration(FlaxPegasusPreTrainedModel):
         encoder_attention_mask: Optional[jnp.ndarray] = None,
         decoder_attention_mask: Optional[jnp.ndarray] = None,
         decoder_position_ids: Optional[jnp.ndarray] = None,
-        past_key_values: dict = None,
+        past_key_values: Optional[dict] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         deterministic: bool = True,
-        params: dict = None,
+        params: Optional[dict] = None,
         dropout_rng: PRNGKey = None,
     ):
         r"""
@@ -1454,8 +1449,8 @@ class FlaxPegasusForConditionalGeneration(FlaxPegasusPreTrainedModel):
         self,
         decoder_input_ids,
         max_length,
-        attention_mask: Optional[jnp.DeviceArray] = None,
-        decoder_attention_mask: Optional[jnp.DeviceArray] = None,
+        attention_mask: Optional[jax.Array] = None,
+        decoder_attention_mask: Optional[jax.Array] = None,
         encoder_outputs=None,
         **kwargs,
     ):
@@ -1492,7 +1487,7 @@ FLAX_PEGASUS_CONDITIONAL_GENERATION_DOCSTRING = """
 
     Summarization example:
 
-    ```pyton
+    ```python
     >>> from transformers import AutoTokenizer, FlaxPegasusForConditionalGeneration
 
     >>> model = FlaxPegasusForConditionalGeneration.from_pretrained('google/pegasus-large')
@@ -1532,3 +1527,6 @@ overwrite_call_docstring(
 append_replace_return_docstrings(
     FlaxPegasusForConditionalGeneration, output_type=FlaxSeq2SeqLMOutput, config_class=_CONFIG_FOR_DOC
 )
+
+
+__all__ = ["FlaxPegasusForConditionalGeneration", "FlaxPegasusModel", "FlaxPegasusPreTrainedModel"]

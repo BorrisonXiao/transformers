@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License
-""" Tokenization classes for mLUKE."""
-
+"""Tokenization classes for mLUKE."""
 
 import itertools
 import json
@@ -39,6 +38,7 @@ from ...tokenization_utils_base import (
     to_py_obj,
 )
 from ...utils import add_end_docstrings, is_tf_tensor, is_torch_tensor, logging
+from ...utils.import_utils import requires
 
 
 logger = logging.get_logger(__name__)
@@ -52,21 +52,6 @@ SPIECE_UNDERLINE = "▁"
 
 VOCAB_FILES_NAMES = {"vocab_file": "sentencepiece.bpe.model", "entity_vocab_file": "entity_vocab.json"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "studio-ousia/mluke-base": "https://huggingface.co/studio-ousia/mluke-base/resolve/main/vocab.json",
-    },
-    "merges_file": {
-        "studio-ousia/mluke-base": "https://huggingface.co/studio-ousia/mluke-base/resolve/main/merges.txt",
-    },
-    "entity_vocab_file": {
-        "studio-ousia/mluke-base": "https://huggingface.co/studio-ousia/mluke-base/resolve/main/entity_vocab.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "studio-ousia/mluke-base": 512,
-}
 
 ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
             return_token_type_ids (`bool`, *optional*):
@@ -144,6 +129,7 @@ ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
 """
 
 
+@requires(backends=("sentencepiece",))
 class MLukeTokenizer(PreTrainedTokenizer):
     """
     Adapted from [`XLMRobertaTokenizer`] and [`LukeTokenizer`]. Based on
@@ -230,8 +216,6 @@ class MLukeTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -272,31 +256,10 @@ class MLukeTokenizer(PreTrainedTokenizer):
             if isinstance(entity_token_2, str)
             else entity_token_2
         )
-        kwargs["additional_special_tokens"] = kwargs.get("additional_special_tokens", [])
-        kwargs["additional_special_tokens"] += [entity_token_1, entity_token_2]
+        additional_special_tokens = kwargs.pop("additional_special_tokens", [])
+        additional_special_tokens += [entity_token_1, entity_token_2]
 
         self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
-
-        super().__init__(
-            bos_token=bos_token,
-            eos_token=eos_token,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            cls_token=cls_token,
-            pad_token=pad_token,
-            mask_token=mask_token,
-            sp_model_kwargs=self.sp_model_kwargs,
-            task=task,
-            max_entity_length=max_entity_length,
-            max_mention_length=max_mention_length,
-            entity_token_1=entity_token_1,
-            entity_token_2=entity_token_2,
-            entity_unk_token=entity_unk_token,
-            entity_pad_token=entity_pad_token,
-            entity_mask_token=entity_mask_token,
-            entity_mask2_token=entity_mask2_token,
-            **kwargs,
-        )
 
         self.sp_model = spm.SentencePieceProcessor(**self.sp_model_kwargs)
         self.sp_model.Load(str(vocab_file))
@@ -345,6 +308,65 @@ class MLukeTokenizer(PreTrainedTokenizer):
 
         self.max_mention_length = max_mention_length
 
+        super().__init__(
+            bos_token=bos_token,
+            eos_token=eos_token,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            cls_token=cls_token,
+            pad_token=pad_token,
+            mask_token=mask_token,
+            sp_model_kwargs=self.sp_model_kwargs,
+            task=task,
+            max_entity_length=max_entity_length,
+            max_mention_length=max_mention_length,
+            entity_token_1=entity_token_1,
+            entity_token_2=entity_token_2,
+            entity_unk_token=entity_unk_token,
+            entity_pad_token=entity_pad_token,
+            entity_mask_token=entity_mask_token,
+            entity_mask2_token=entity_mask2_token,
+            additional_special_tokens=additional_special_tokens,
+            **kwargs,
+        )
+
+    @property
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.vocab_size
+    def vocab_size(self):
+        return len(self.sp_model) + self.fairseq_offset + 1  # Add the <mask> token
+
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.get_vocab
+    def get_vocab(self):
+        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
+        vocab.update(self.added_tokens_encoder)
+        return vocab
+
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._tokenize
+    def _tokenize(self, text: str) -> List[str]:
+        # TODO check if the t5/llama PR also applies here
+        return self.sp_model.encode(text, out_type=str)
+
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._convert_token_to_id
+    def _convert_token_to_id(self, token):
+        """Converts a token (str) in an id using the vocab."""
+        if token in self.fairseq_tokens_to_ids:
+            return self.fairseq_tokens_to_ids[token]
+        spm_id = self.sp_model.PieceToId(token)
+
+        # Need to return unknown token if the SP model returned 0
+        return spm_id + self.fairseq_offset if spm_id else self.unk_token_id
+
+    def _convert_id_to_token(self, index):
+        """Converts an index (integer) in a token (str) using the vocab."""
+        if index in self.fairseq_ids_to_tokens:
+            return self.fairseq_ids_to_tokens[index]
+        return self.sp_model.IdToPiece(index - self.fairseq_offset)
+
+    def convert_tokens_to_string(self, tokens):
+        """Converts a sequence of tokens (strings for sub-words) in a single string."""
+        out_string = "".join(tokens).replace(SPIECE_UNDERLINE, " ").strip()
+        return out_string
+
     def __getstate__(self):
         state = self.__dict__.copy()
         state["sp_model"] = None
@@ -379,6 +401,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: Optional[bool] = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -471,6 +494,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                 stride=stride,
                 is_split_into_words=is_split_into_words,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_tensors=return_tensors,
                 return_token_type_ids=return_token_type_ids,
                 return_attention_mask=return_attention_mask,
@@ -497,6 +521,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                 stride=stride,
                 is_split_into_words=is_split_into_words,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_tensors=return_tensors,
                 return_token_type_ids=return_token_type_ids,
                 return_attention_mask=return_attention_mask,
@@ -525,6 +550,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: Optional[bool] = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -579,6 +605,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
             max_entity_length=max_entity_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             prepend_batch_axis=True,
             return_attention_mask=return_attention_mask,
@@ -607,6 +634,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: Optional[bool] = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -687,6 +715,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
             max_entity_length=max_entity_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
             return_token_type_ids=return_token_type_ids,
             return_overflowing_tokens=return_overflowing_tokens,
@@ -701,7 +730,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
     # Copied from transformers.models.luke.tokenization_luke.LukeTokenizer._check_entity_input_format
     def _check_entity_input_format(self, entities: Optional[EntityInput], entity_spans: Optional[EntitySpanInput]):
         if not isinstance(entity_spans, list):
-            raise ValueError("entity_spans should be given as a list")
+            raise TypeError("entity_spans should be given as a list")
         elif len(entity_spans) > 0 and not isinstance(entity_spans[0], tuple):
             raise ValueError(
                 "entity_spans should be given as a list of tuples containing the start and end character indices"
@@ -884,6 +913,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         max_entity_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[str] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -926,6 +956,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 stride=stride,
                 pad_to_multiple_of=None,  # we pad in batch afterward
+                padding_side=None,  # we pad in batch afterward
                 return_attention_mask=False,  # we pad in batch afterward
                 return_token_type_ids=return_token_type_ids,
                 return_overflowing_tokens=return_overflowing_tokens,
@@ -946,6 +977,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
             padding=padding_strategy.value,
             max_length=max_length,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
         )
 
@@ -970,6 +1002,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         max_entity_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -1172,6 +1205,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 padding=padding_strategy.value,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
 
@@ -1198,6 +1232,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         max_entity_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_attention_mask: Optional[bool] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         verbose: bool = True,
@@ -1234,6 +1269,9 @@ class MLukeTokenizer(PreTrainedTokenizer):
             pad_to_multiple_of (`int`, *optional*):
                 If set will pad the sequence to a multiple of the provided value. This is especially useful to enable
                 the use of Tensor Cores on NVIDIA hardware with compute capability `>= 7.5` (Volta).
+            padding_side:
+                The side on which the model should have padding applied. Should be selected between ['right', 'left'].
+                Default value is picked from the class attribute of the same name.
             return_attention_mask (`bool`, *optional*):
                 Whether to return the attention mask. If left to the default, will return the attention mask according
                 to the specific tokenizer's default, defined by the `return_outputs` attribute. [What are attention
@@ -1311,6 +1349,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 padding_strategy=padding_strategy,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
             return BatchEncoding(encoded_inputs, tensor_type=return_tensors)
@@ -1335,6 +1374,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                 max_entity_length=max_entity_length,
                 padding_strategy=padding_strategy,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
 
@@ -1353,6 +1393,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
         max_entity_length: Optional[int] = None,
         padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_attention_mask: Optional[bool] = None,
     ) -> dict:
         """
@@ -1379,6 +1420,9 @@ class MLukeTokenizer(PreTrainedTokenizer):
             pad_to_multiple_of: (optional) Integer if set will pad the sequence to a multiple of the provided value.
                 This is especially useful to enable the use of Tensor Core on NVIDIA hardware with compute capability
                 `>= 7.5` (Volta).
+            padding_side:
+                The side on which the model should have padding applied. Should be selected between ['right', 'left'].
+                Default value is picked from the class attribute of the same name.
             return_attention_mask:
                 (optional) Set to False to avoid returning attention mask (default: set to model specifics)
         """
@@ -1417,9 +1461,10 @@ class MLukeTokenizer(PreTrainedTokenizer):
 
         if needs_to_be_padded:
             difference = max_length - len(encoded_inputs["input_ids"])
+            padding_side = padding_side if padding_side is not None else self.padding_side
             if entities_provided:
                 entity_difference = max_entity_length - len(encoded_inputs["entity_ids"])
-            if self.padding_side == "right":
+            if padding_side == "right":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"] + [0] * difference
                     if entities_provided:
@@ -1450,7 +1495,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                             encoded_inputs["entity_end_positions"] + [0] * entity_difference
                         )
 
-            elif self.padding_side == "left":
+            elif padding_side == "left":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = [0] * difference + encoded_inputs["attention_mask"]
                     if entities_provided:
@@ -1481,7 +1526,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
                             "entity_end_positions"
                         ]
             else:
-                raise ValueError("Invalid padding strategy:" + str(self.padding_side))
+                raise ValueError("Invalid padding strategy:" + str(padding_side))
 
         return encoded_inputs
 
@@ -1494,8 +1539,12 @@ class MLukeTokenizer(PreTrainedTokenizer):
             save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["vocab_file"]
         )
 
-        if os.path.abspath(self.vocab_file) != os.path.abspath(out_vocab_file):
+        if os.path.abspath(self.vocab_file) != os.path.abspath(out_vocab_file) and os.path.isfile(self.vocab_file):
             copyfile(self.vocab_file, out_vocab_file)
+        elif not os.path.isfile(self.vocab_file):
+            with open(out_vocab_file, "wb") as fi:
+                content_spiece_model = self.sp_model.serialized_model_proto()
+                fi.write(content_spiece_model)
 
         entity_vocab_file = os.path.join(
             save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["entity_vocab_file"]
@@ -1588,38 +1637,5 @@ class MLukeTokenizer(PreTrainedTokenizer):
             return len(cls + token_ids_0 + sep) * [0]
         return len(cls + token_ids_0 + sep + sep + token_ids_1 + sep) * [0]
 
-    @property
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.vocab_size
-    def vocab_size(self):
-        return len(self.sp_model) + self.fairseq_offset + 1  # Add the <mask> token
 
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.get_vocab
-    def get_vocab(self):
-        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
-        vocab.update(self.added_tokens_encoder)
-        return vocab
-
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._tokenize
-    def _tokenize(self, text: str) -> List[str]:
-        return self.sp_model.encode(text, out_type=str)
-
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._convert_token_to_id
-    def _convert_token_to_id(self, token):
-        """Converts a token (str) in an id using the vocab."""
-        if token in self.fairseq_tokens_to_ids:
-            return self.fairseq_tokens_to_ids[token]
-        spm_id = self.sp_model.PieceToId(token)
-
-        # Need to return unknown token if the SP model returned 0
-        return spm_id + self.fairseq_offset if spm_id else self.unk_token_id
-
-    def _convert_id_to_token(self, index):
-        """Converts an index (integer) in a token (str) using the vocab."""
-        if index in self.fairseq_ids_to_tokens:
-            return self.fairseq_ids_to_tokens[index]
-        return self.sp_model.IdToPiece(index - self.fairseq_offset)
-
-    def convert_tokens_to_string(self, tokens):
-        """Converts a sequence of tokens (strings for sub-words) in a single string."""
-        out_string = "".join(tokens).replace(SPIECE_UNDERLINE, " ").strip()
-        return out_string
+__all__ = ["MLukeTokenizer"]

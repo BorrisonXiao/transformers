@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" SEW model configuration"""
+"""SEW model configuration"""
 
 import functools
 import operator
@@ -22,11 +22,6 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-SEW_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "asapp/sew-tiny-100k": "https://huggingface.co/asapp/sew-tiny-100k/resolve/main/config.json",
-    # See all SEW models at https://huggingface.co/models?filter=sew
-}
 
 
 class SEWConfig(PretrainedConfig):
@@ -59,6 +54,8 @@ class SEWConfig(PretrainedConfig):
             `"relu"`, `"selu"` and `"gelu_new"` are supported.
         hidden_dropout (`float`, *optional*, defaults to 0.1):
             The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
+        activation_dropout (`float`, *optional*, defaults to 0.1):
+            The dropout ratio for activations inside the fully connected layer.
         attention_dropout (`float`, *optional*, defaults to 0.1):
             The dropout ratio for the attention probabilities.
         final_dropout (`float`, *optional*, defaults to 0.1):
@@ -102,8 +99,8 @@ class SEWConfig(PretrainedConfig):
             Recognition](https://arxiv.org/abs/1904.08779).
         mask_time_prob (`float`, *optional*, defaults to 0.05):
             Percentage (between 0 and 1) of all feature vectors along the time axis which will be masked. The masking
-            procecure generates ''mask_time_prob*len(time_axis)/mask_time_length'' independent masks over the axis. If
-            reasoning from the propability of each feature vector to be chosen as the start of the vector span to be
+            procedure generates ''mask_time_prob*len(time_axis)/mask_time_length'' independent masks over the axis. If
+            reasoning from the probability of each feature vector to be chosen as the start of the vector span to be
             masked, *mask_time_prob* should be `prob_vector_start*mask_time_length`. Note that overlap may decrease the
             actual percentage of masked vectors. This is only relevant if `apply_spec_augment is True`.
         mask_time_length (`int`, *optional*, defaults to 10):
@@ -114,8 +111,8 @@ class SEWConfig(PretrainedConfig):
             mask_time_min_masks''
         mask_feature_prob (`float`, *optional*, defaults to 0.0):
             Percentage (between 0 and 1) of all feature vectors along the feature axis which will be masked. The
-            masking procecure generates ''mask_feature_prob*len(feature_axis)/mask_time_length'' independent masks over
-            the axis. If reasoning from the propability of each feature vector to be chosen as the start of the vector
+            masking procedure generates ''mask_feature_prob*len(feature_axis)/mask_time_length'' independent masks over
+            the axis. If reasoning from the probability of each feature vector to be chosen as the start of the vector
             span to be masked, *mask_feature_prob* should be `prob_vector_start*mask_feature_length`. Note that overlap
             may decrease the actual percentage of masked vectors. This is only relevant if `apply_spec_augment is
             True`.
@@ -152,6 +149,7 @@ class SEWConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "sew"
 
     def __init__(
@@ -227,9 +225,9 @@ class SEWConfig(PretrainedConfig):
             or (len(self.conv_dim) != self.num_feat_extract_layers)
         ):
             raise ValueError(
-                "Configuration for convolutional layers is incorrect."
-                "It is required that `len(config.conv_dim)` == `len(config.conv_stride)` == `len(config.conv_kernel)`,"
-                f"but is `len(config.conv_dim) = {len(self.conv_dim)}`, `len(config.conv_stride)"
+                "Configuration for convolutional layers is incorrect. "
+                "It is required that `len(config.conv_dim)` == `len(config.conv_stride)` == `len(config.conv_kernel)`, "
+                f"but is `len(config.conv_dim) = {len(self.conv_dim)}`, `len(config.conv_stride) "
                 f"= {len(self.conv_stride)}`, `len(config.conv_kernel) = {len(self.conv_kernel)}`."
             )
 
@@ -253,3 +251,6 @@ class SEWConfig(PretrainedConfig):
     @property
     def inputs_to_logits_ratio(self):
         return functools.reduce(operator.mul, self.conv_stride, 1)
+
+
+__all__ = ["SEWConfig"]

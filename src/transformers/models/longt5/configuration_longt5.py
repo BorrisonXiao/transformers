@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" LongT5 model configuration"""
+"""LongT5 model configuration"""
+
 from typing import Mapping
 
 from ...configuration_utils import PretrainedConfig
@@ -21,13 +22,6 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-LONGT5_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "google/long-t5-local-base": "https://huggingface.co/google/long-t5-local-base/blob/main/config.json",
-    "google/long-t5-local-large": "https://huggingface.co/google/long-t5-local-large/blob/main/config.json",
-    "google/long-t5-tglobal-base": "https://huggingface.co/google/long-t5-tglobal-base/blob/main/config.json",
-    "google/long-t5-tglobal-large": "https://huggingface.co/google/long-t5-tglobal-large/blob/main/config.json",
-}
 
 
 class LongT5Config(PretrainedConfig):
@@ -60,7 +54,7 @@ class LongT5Config(PretrainedConfig):
         local_radius (`int`, *optional*, defaults to 127)
             Number of tokens to the left/right for each token to locally self-attend in a local attention mechanism.
         global_block_size (`int`, *optional*, defaults to 16)
-            Lenght of blocks an input sequence is divided into for a global token representation. Used only for
+            Length of blocks an input sequence is divided into for a global token representation. Used only for
             `encoder_attention_type = "transient-global"`.
         relative_attention_num_buckets (`int`, *optional*, defaults to 32):
             The number of buckets to use for each attention layer.
@@ -82,9 +76,15 @@ class LongT5Config(PretrainedConfig):
         use_cache (`bool`, *optional*, defaults to `True`):
             Whether or not the model should return the last key/values attentions (not used by all models).
     """
+
     model_type = "longt5"
     keys_to_ignore_at_inference = ["past_key_values"]
-    attribute_map = {"hidden_size": "d_model", "num_attention_heads": "num_heads", "num_hidden_layers": "num_layers"}
+    attribute_map = {
+        "hidden_size": "d_model",
+        "num_attention_heads": "num_heads",
+        "num_hidden_layers": "num_layers",
+        "head_dim": "d_kv",
+    }
 
     def __init__(
         self,
@@ -135,7 +135,7 @@ class LongT5Config(PretrainedConfig):
 
         if len(act_info) > 1 and act_info[0] != "gated" or len(act_info) > 2:
             raise ValueError(
-                f"`feed_forward_proj`: {feed_forward_proj} is not a valid activation function of the dense layer."
+                f"`feed_forward_proj`: {feed_forward_proj} is not a valid activation function of the dense layer. "
                 "Please make sure `feed_forward_proj` is of the format `gated-{ACT_FN}` or `{ACT_FN}`, e.g. "
                 "'gated-gelu' or 'relu'"
             )
@@ -175,3 +175,6 @@ class LongT5OnnxConfig(OnnxSeq2SeqConfigWithPast):
     @property
     def default_onnx_opset(self) -> int:
         return 13
+
+
+__all__ = ["LongT5Config", "LongT5OnnxConfig"]

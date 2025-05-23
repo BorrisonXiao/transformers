@@ -14,7 +14,6 @@
 # limitations under the License.
 """Convert Perceiver checkpoints originally implemented in Haiku."""
 
-
 import argparse
 import json
 import pickle
@@ -29,13 +28,13 @@ from PIL import Image
 
 from transformers import (
     PerceiverConfig,
-    PerceiverFeatureExtractor,
     PerceiverForImageClassificationConvProcessing,
     PerceiverForImageClassificationFourier,
     PerceiverForImageClassificationLearned,
     PerceiverForMaskedLM,
     PerceiverForMultimodalAutoencoding,
     PerceiverForOpticalFlow,
+    PerceiverImageProcessor,
     PerceiverTokenizer,
 )
 from transformers.utils import logging
@@ -389,9 +388,9 @@ def convert_perceiver_checkpoint(pickle_file, pytorch_dump_folder_path, architec
         inputs = encoding.input_ids
         input_mask = encoding.attention_mask
     elif architecture in ["image_classification", "image_classification_fourier", "image_classification_conv"]:
-        feature_extractor = PerceiverFeatureExtractor()
+        image_processor = PerceiverImageProcessor()
         image = prepare_img()
-        encoding = feature_extractor(image, return_tensors="pt")
+        encoding = image_processor(image, return_tensors="pt")
         inputs = encoding.pixel_values
     elif architecture == "optical_flow":
         inputs = torch.randn(1, 2, 27, 368, 496)
@@ -445,7 +444,8 @@ if __name__ == "__main__":
         type=str,
         default=None,
         required=True,
-        help="Path to local pickle file of a Perceiver checkpoint you'd like to convert.",
+        help="Path to local pickle file of a Perceiver checkpoint you'd like to convert.\n"
+        "Given the files are in the pickle format, please be wary of passing it files you trust.",
     )
     parser.add_argument(
         "--pytorch_dump_folder_path",

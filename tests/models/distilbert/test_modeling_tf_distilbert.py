@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2020 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,7 +29,6 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers.models.distilbert.modeling_tf_distilbert import (
-        TF_DISTILBERT_PRETRAINED_MODEL_ARCHIVE_LIST,
         TFDistilBertForMaskedLM,
         TFDistilBertForMultipleChoice,
         TFDistilBertForQuestionAnswering,
@@ -54,7 +52,7 @@ class TFDistilBertModelTester:
         self.use_labels = True
         self.vocab_size = 99
         self.hidden_size = 32
-        self.num_hidden_layers = 5
+        self.num_hidden_layers = 2
         self.num_attention_heads = 4
         self.intermediate_size = 37
         self.hidden_act = "gelu"
@@ -233,9 +231,9 @@ class TFDistilBertModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Te
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in list(TF_DISTILBERT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]):
-            model = TFDistilBertModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "distilbert/distilbert-base-cased"
+        model = TFDistilBertModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @require_tf

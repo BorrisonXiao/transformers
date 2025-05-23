@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,11 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch SwiftFormer model. """
-
+"""Testing suite for the PyTorch SwiftFormer model."""
 
 import copy
-import inspect
 import unittest
 
 from transformers import PretrainedConfig, SwiftFormerConfig
@@ -38,7 +35,6 @@ if is_torch_available():
     from torch import nn
 
     from transformers import SwiftFormerForImageClassification, SwiftFormerModel
-    from transformers.models.swiftformer.modeling_swiftformer import SWIFTFORMER_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -58,9 +54,9 @@ class SwiftFormerModelTester:
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
         image_size=224,
-        num_labels=1000,
-        layer_depths=[3, 3, 6, 4],
-        embed_dims=[48, 56, 112, 220],
+        num_labels=3,
+        layer_depths=[1, 1, 1, 1],
+        embed_dims=[16, 16, 32, 32],
     ):
         self.parent = parent
         self.batch_size = batch_size
@@ -140,7 +136,7 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     all_model_classes = (SwiftFormerModel, SwiftFormerForImageClassification) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": SwiftFormerModel, "image-classification": SwiftFormerForImageClassification}
+        {"image-feature-extraction": SwiftFormerModel, "image-classification": SwiftFormerForImageClassification}
         if is_torch_available()
         else {}
     )
@@ -150,6 +146,7 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
     test_resize_embeddings = False
     test_head_masking = False
     has_attentions = False
+    test_torch_exportable = True
 
     def setUp(self):
         self.model_tester = SwiftFormerModelTester(self)
@@ -169,25 +166,13 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_inputs_embeds(self):
         pass
 
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
             model = model_class(config)
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
-
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -199,9 +184,9 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in SWIFTFORMER_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = SwiftFormerModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "MBZUAI/swiftformer-xs"
+        model = SwiftFormerModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     @unittest.skip(reason="SwiftFormer does not output attentions")
     def test_attention_outputs(self):
@@ -283,16 +268,16 @@ def prepare_img():
 @require_vision
 class SwiftFormerModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
+    def default_image_processor(self):
         return ViTImageProcessor.from_pretrained("MBZUAI/swiftformer-xs") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = SwiftFormerForImageClassification.from_pretrained("MBZUAI/swiftformer-xs").to(torch_device)
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
+        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():
@@ -303,4 +288,4 @@ class SwiftFormerModelIntegrationTest(unittest.TestCase):
         self.assertEqual(outputs.logits.shape, expected_shape)
 
         expected_slice = torch.tensor([[-2.1703e00, 2.1107e00, -2.0811e00]]).to(torch_device)
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(outputs.logits[0, :3], expected_slice, rtol=1e-4, atol=1e-4)

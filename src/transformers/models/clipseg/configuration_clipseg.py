@@ -12,21 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" CLIPSeg model configuration"""
-
-import copy
-import os
-from typing import Union
+"""CLIPSeg model configuration"""
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-CLIPSEG_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "CIDAS/clipseg-rd64": "https://huggingface.co/CIDAS/clipseg-rd64/resolve/main/config.json",
-}
 
 
 class CLIPSegTextConfig(PretrainedConfig):
@@ -56,16 +48,22 @@ class CLIPSegTextConfig(PretrainedConfig):
             just in case (e.g., 512 or 1024 or 2048).
         hidden_act (`str` or `function`, *optional*, defaults to `"quick_gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-5):
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
+        layer_norm_eps (`float`, *optional*, defaults to 1e-05):
             The epsilon used by the layer normalization layers.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1.0):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
+        pad_token_id (`int`, *optional*, defaults to 1):
+            Padding token id.
+        bos_token_id (`int`, *optional*, defaults to 49406):
+            Beginning of stream token id.
+        eos_token_id (`int`, *optional*, defaults to 49407):
+            End of stream token id.
 
     Example:
 
@@ -81,7 +79,9 @@ class CLIPSegTextConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "clipseg_text_model"
+    base_config_key = "text_config"
 
     def __init__(
         self,
@@ -97,8 +97,8 @@ class CLIPSegTextConfig(PretrainedConfig):
         initializer_range=0.02,
         initializer_factor=1.0,
         pad_token_id=1,
-        bos_token_id=0,
-        eos_token_id=2,
+        bos_token_id=49406,
+        eos_token_id=49407,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -114,24 +114,6 @@ class CLIPSegTextConfig(PretrainedConfig):
         self.initializer_range = initializer_range
         self.initializer_factor = initializer_factor
         self.attention_dropout = attention_dropout
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the text config dict if we are loading from CLIPSegConfig
-        if config_dict.get("model_type") == "clipseg":
-            config_dict = config_dict["text_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
 
 
 class CLIPSegVisionConfig(PretrainedConfig):
@@ -153,20 +135,22 @@ class CLIPSegVisionConfig(PretrainedConfig):
             Number of hidden layers in the Transformer encoder.
         num_attention_heads (`int`, *optional*, defaults to 12):
             Number of attention heads for each attention layer in the Transformer encoder.
+        num_channels (`int`, *optional*, defaults to 3):
+            The number of input channels.
         image_size (`int`, *optional*, defaults to 224):
             The size (resolution) of each image.
         patch_size (`int`, *optional*, defaults to 32):
             The size (resolution) of each patch.
         hidden_act (`str` or `function`, *optional*, defaults to `"quick_gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-5):
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
+        layer_norm_eps (`float`, *optional*, defaults to 1e-05):
             The epsilon used by the layer normalization layers.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1.0):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
 
@@ -186,6 +170,7 @@ class CLIPSegVisionConfig(PretrainedConfig):
     ```"""
 
     model_type = "clipseg_vision_model"
+    base_config_key = "vision_config"
 
     def __init__(
         self,
@@ -218,24 +203,6 @@ class CLIPSegVisionConfig(PretrainedConfig):
         self.layer_norm_eps = layer_norm_eps
         self.hidden_act = hidden_act
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the vision config dict if we are loading from CLIPSegConfig
-        if config_dict.get("model_type") == "clipseg":
-            config_dict = config_dict["vision_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
 
 class CLIPSegConfig(PretrainedConfig):
     r"""
@@ -255,8 +222,8 @@ class CLIPSegConfig(PretrainedConfig):
         projection_dim (`int`, *optional*, defaults to 512):
             Dimensionality of text and vision projection layers.
         logit_scale_init_value (`float`, *optional*, defaults to 2.6592):
-            The inital value of the *logit_scale* paramter. Default is used as per the original CLIPSeg implementation.
-        extract_layers (`List[int]`, *optional*, defaults to [3, 6, 9]):
+            The initial value of the *logit_scale* parameter. Default is used as per the original CLIPSeg implementation.
+        extract_layers (`List[int]`, *optional*, defaults to `[3, 6, 9]`):
             Layers to extract when forwarding the query image through the frozen visual backbone of CLIP.
         reduce_dim (`int`, *optional*, defaults to 64):
             Dimensionality to reduce the CLIP vision embedding.
@@ -266,7 +233,7 @@ class CLIPSegConfig(PretrainedConfig):
             The dropout ratio for the attention probabilities.
         decoder_hidden_act (`str` or `function`, *optional*, defaults to `"quick_gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
         decoder_intermediate_size (`int`, *optional*, defaults to 2048):
             Dimensionality of the "intermediate" (i.e., feed-forward) layers in the Transformer decoder.
         conditional_layer (`int`, *optional*, defaults to 0):
@@ -302,7 +269,7 @@ class CLIPSegConfig(PretrainedConfig):
     ```"""
 
     model_type = "clipseg"
-    is_composition = True
+    sub_configs = {"text_config": CLIPSegTextConfig, "vision_config": CLIPSegVisionConfig}
 
     def __init__(
         self,
@@ -351,9 +318,9 @@ class CLIPSegConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`text_config_dict` is provided which will be used to initialize `CLIPSegTextConfig`. The "
-                            f'value `text_config["{key}"]` will be overriden.'
+                            f'value `text_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `text_config` with the ones in `_text_config_dict`.
             text_config.update(_text_config_dict)
@@ -383,9 +350,9 @@ class CLIPSegConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`vision_config_dict` is provided which will be used to initialize `CLIPSegVisionConfig`. "
-                            f'The value `vision_config["{key}"]` will be overriden.'
+                            f'The value `vision_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `vision_config` with the ones in `_vision_config_dict`.
             vision_config.update(_vision_config_dict)
@@ -425,15 +392,5 @@ class CLIPSegConfig(PretrainedConfig):
 
         return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
 
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
 
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["text_config"] = self.text_config.to_dict()
-        output["vision_config"] = self.vision_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output
+__all__ = ["CLIPSegConfig", "CLIPSegTextConfig", "CLIPSegVisionConfig"]

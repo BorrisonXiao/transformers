@@ -73,12 +73,12 @@ Cada clase de alimento - o label - corresponde a un número; `79` indica una cos
 
 ## Preprocesa
 
-Carga el feature extractor de ViT para procesar la imagen en un tensor:
+Carga el image processor de ViT para procesar la imagen en un tensor:
 
 ```py
->>> from transformers import AutoFeatureExtractor
+>>> from transformers import AutoImageProcessor
 
->>> feature_extractor = AutoFeatureExtractor.from_pretrained("google/vit-base-patch16-224-in21k")
+>>> image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
 ```
 
 Aplica varias transformaciones de imagen al dataset para hacer el modelo más robusto contra el overfitting. En este caso se utilizará el módulo [`transforms`](https://pytorch.org/vision/stable/transforms.html) de torchvision. Recorta una parte aleatoria de la imagen, cambia su tamaño y normalízala con la media y la desviación estándar de la imagen:
@@ -86,8 +86,8 @@ Aplica varias transformaciones de imagen al dataset para hacer el modelo más ro
 ```py
 >>> from torchvision.transforms import RandomResizedCrop, Compose, Normalize, ToTensor
 
->>> normalize = Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
->>> _transforms = Compose([RandomResizedCrop(feature_extractor.size), ToTensor(), normalize])
+>>> normalize = Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
+>>> _transforms = Compose([RandomResizedCrop(image_processor.size["height"]), ToTensor(), normalize])
 ```
 
 Crea una función de preprocesamiento que aplique las transformaciones y devuelva los `pixel_values` - los inputs al modelo - de la imagen:
@@ -99,7 +99,7 @@ Crea una función de preprocesamiento que aplique las transformaciones y devuelv
 ...     return examples
 ```
 
-Utiliza el método [`with_transform`](https://huggingface.co/docs/datasets/package_reference/main_classes.html?#datasets.Dataset.with_transform) de 🤗 Dataset para aplicar las transformaciones sobre todo el dataset. Las transformaciones se aplican sobre la marcha cuando se carga un elemento del dataset:
+Utiliza el método [`with_transform`](https://huggingface.co/docs/datasets/package_reference/main_classes?#datasets.Dataset.with_transform) de 🤗 Dataset para aplicar las transformaciones sobre todo el dataset. Las transformaciones se aplican sobre la marcha cuando se carga un elemento del dataset:
 
 ```py
 >>> food = food.with_transform(transforms)
@@ -143,7 +143,7 @@ Al llegar a este punto, solo quedan tres pasos:
 >>> training_args = TrainingArguments(
 ...     output_dir="./results",
 ...     per_device_train_batch_size=16,
-...     evaluation_strategy="steps",
+...     eval_strategy="steps",
 ...     num_train_epochs=4,
 ...     fp16=True,
 ...     save_steps=100,
@@ -160,7 +160,7 @@ Al llegar a este punto, solo quedan tres pasos:
 ...     data_collator=data_collator,
 ...     train_dataset=food["train"],
 ...     eval_dataset=food["test"],
-...     tokenizer=feature_extractor,
+...     processing_class=image_processor,
 ... )
 
 >>> trainer.train()

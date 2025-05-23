@@ -37,7 +37,7 @@ except (ImportError, AttributeError):
     _serve_dependencies_installed = False
 
 
-logger = logging.get_logger("transformers-cli/serving")
+logger = logging.get_logger("transformers/serving")
 
 
 def serve_command_factory(args: Namespace):
@@ -131,7 +131,7 @@ class ServeCommand(BaseTransformersCLICommand):
         if not _serve_dependencies_installed:
             raise RuntimeError(
                 "Using serve command requires FastAPI and uvicorn. "
-                'Please install transformers with [serving]: pip install "transformers[serving]".'
+                'Please install transformers with [serving]: pip install "transformers[serving]". '
                 "Or install FastAPI and uvicorn separately."
             )
         else:

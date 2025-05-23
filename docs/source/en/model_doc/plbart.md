@@ -16,10 +16,13 @@ rendered properly in your Markdown viewer.
 
 # PLBart
 
-**DISCLAIMER:** If you see something strange, file a [Github Issue](https://github.com/huggingface/transformers/issues/new?assignees=&labels=&template=bug-report.md&title) and assign
-[@gchhablani](https://www.github.com/gchhablani).
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+<img alt="FlashAttention" src="https://img.shields.io/badge/%E2%9A%A1%EF%B8%8E%20FlashAttention-eae0c8?style=flat">
+<img alt="SDPA" src="https://img.shields.io/badge/SDPA-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
 
-## Overview of PLBart
+## Overview
 
 The PLBART model was proposed in [Unified Pre-training for Program Understanding and Generation](https://arxiv.org/abs/2103.06333) by Wasi Uddin Ahmad, Saikat Chakraborty, Baishakhi Ray, Kai-Wei Chang.
 This is a BART-like model which can be used to perform code-summarization, code-generation, and code-translation tasks. The pre-trained model `plbart-base` has been trained using multilingual denoising task
@@ -28,7 +31,7 @@ on Java, Python and English.
 According to the abstract
 
 *Code summarization and generation empower conversion between programming language (PL) and natural language (NL),
-while code translation avails the migration of legacy code from one PL to another. This paper introduces PLBART, 
+while code translation avails the migration of legacy code from one PL to another. This paper introduces PLBART,
 a sequence-to-sequence model capable of performing a broad spectrum of program and language understanding and generation tasks.
 PLBART is pre-trained on an extensive collection of Java and Python functions and associated NL text via denoising autoencoding.
 Experiments on code summarization in the English language, code generation, and code translation in seven programming languages
@@ -40,7 +43,7 @@ even with limited annotations.*
 
 This model was contributed by [gchhablani](https://huggingface.co/gchhablani). The Authors' code can be found [here](https://github.com/wasiahmad/PLBART).
 
-### Training of PLBart
+## Usage examples
 
 PLBart is a multilingual encoder-decoder (sequence-to-sequence) model primarily intended for code-to-text, text-to-code, code-to-code tasks. As the
 model is multilingual it expects the sequences in a different format. A special language id token is added in both the
@@ -49,11 +52,11 @@ target text format is `[tgt_lang_code] X [eos]`. `bos` is never used.
 
 However, for fine-tuning, in some cases no language token is provided in cases where a single language is used. Please refer to [the paper](https://arxiv.org/abs/2103.06333) to learn more about this.
 
-In cases where the language code is needed, the regular [`~PLBartTokenizer.__call__`] will encode source text format 
+In cases where the language code is needed, the regular [`~PLBartTokenizer.__call__`] will encode source text format
 when you pass texts as the first argument or with the keyword argument `text`, and will encode target text format if
 it's passed with the `text_target` keyword argument.
 
-- Supervised training
+### Supervised training
 
 ```python
 >>> from transformers import PLBartForConditionalGeneration, PLBartTokenizer
@@ -65,7 +68,7 @@ it's passed with the `text_target` keyword argument.
 >>> model(**inputs)
 ```
 
-- Generation
+### Generation
 
   While generating the target text set the `decoder_start_token_id` to the target language id. The following
   example shows how to translate Python to English using the `uclanlp/plbart-python-en_XX` model.
@@ -82,7 +85,7 @@ it's passed with the `text_target` keyword argument.
 "Returns the maximum value of a b c."
 ```
 
-## Documentation resources
+## Resources
 
 - [Text classification task guide](../tasks/sequence_classification)
 - [Causal language modeling task guide](../tasks/language_modeling)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2021 The HuggingFace Team All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,7 +27,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import datasets
 import evaluate
@@ -41,7 +40,7 @@ from flax import struct, traverse_util
 from flax.jax_utils import pad_shard_unpad, replicate, unreplicate
 from flax.training import train_state
 from flax.training.common_utils import get_metrics, onehot, shard
-from huggingface_hub import Repository, create_repo
+from huggingface_hub import HfApi
 from tqdm import tqdm
 from utils_qa import postprocess_qa_predictions
 
@@ -55,13 +54,13 @@ from transformers import (
     PreTrainedTokenizerFast,
     is_tensorboard_available,
 )
-from transformers.utils import check_min_version, get_full_repo_name, send_example_telemetry
+from transformers.utils import check_min_version, send_example_telemetry
 
 
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.31.0.dev0")
+check_min_version("4.53.0.dev0")
 
 Array = Any
 Dataset = datasets.arrow_dataset.Dataset
@@ -155,12 +154,22 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    use_auth_token: bool = field(
+    token: str = field(
+        default=None,
+        metadata={
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
+        },
+    )
+    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -372,7 +381,7 @@ def create_train_state(
 # region Create learning rate function
 def create_learning_rate_fn(
     train_ds_size: int, train_batch_size: int, num_train_epochs: int, num_warmup_steps: int, learning_rate: float
-) -> Callable[[int], jnp.array]:
+) -> Callable[[int], jnp.ndarray]:
     """Returns a linear warmup, linear_decay learning rate function."""
     steps_per_epoch = train_ds_size // train_batch_size
     num_train_steps = steps_per_epoch * num_train_epochs
@@ -416,7 +425,8 @@ def eval_data_collator(dataset: Dataset, batch_size: int):
 
     for idx in batch_idx:
         batch = dataset[idx]
-        batch = {k: np.array(v) for k, v in batch.items()}
+        # Ignore `offset_mapping` to avoid numpy/JAX array conversion issue.
+        batch = {k: np.array(v) for k, v in batch.items() if k != "offset_mapping"}
 
         yield batch
 
@@ -462,14 +472,13 @@ def main():
 
     # Handle the repository creation
     if training_args.push_to_hub:
-        if training_args.hub_model_id is None:
-            repo_name = get_full_repo_name(
-                Path(training_args.output_dir).absolute().name, token=training_args.hub_token
-            )
-        else:
-            repo_name = training_args.hub_model_id
-        create_repo(repo_name, exist_ok=True, token=training_args.hub_token)
-        repo = Repository(training_args.output_dir, clone_from=repo_name, token=training_args.hub_token)
+        # Retrieve of infer repo_name
+        repo_name = training_args.hub_model_id
+        if repo_name is None:
+            repo_name = Path(training_args.output_dir).absolute().name
+        # Create repo and retrieve repo_id
+        api = HfApi()
+        repo_id = api.create_repo(repo_name, exist_ok=True, token=training_args.hub_token).repo_id
 
     # region Load Data
     # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
@@ -487,7 +496,8 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
         )
     else:
         # Loading the dataset from local csv or json file.
@@ -507,10 +517,10 @@ def main():
             data_files=data_files,
             field="data",
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
+    # https://huggingface.co/docs/datasets/loading_datasets.
     # endregion
 
     # region Load pretrained model and tokenizer
@@ -520,14 +530,16 @@ def main():
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         use_fast=True,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
     # endregion
 
@@ -557,7 +569,7 @@ def main():
 
     if data_args.max_seq_length > tokenizer.model_max_length:
         logger.warning(
-            f"The max_seq_length passed ({data_args.max_seq_length}) is larger than the maximum length for the"
+            f"The max_seq_length passed ({data_args.max_seq_length}) is larger than the maximum length for the "
             f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
         )
     max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
@@ -646,7 +658,7 @@ def main():
             raise ValueError("--do_train requires a train dataset")
         train_dataset = raw_datasets["train"]
         if data_args.max_train_samples is not None:
-            # We will select sample from whole data if agument is specified
+            # We will select sample from whole data if argument is specified
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
         # Create train feature from dataset
@@ -779,7 +791,9 @@ def main():
         references = [{"id": ex["id"], "answers": ex[answer_column_name]} for ex in examples]
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
-    metric = evaluate.load("squad_v2" if data_args.version_2_with_negative else "squad")
+    metric = evaluate.load(
+        "squad_v2" if data_args.version_2_with_negative else "squad", cache_dir=model_args.cache_dir
+    )
 
     def compute_metrics(p: EvalPrediction):
         return metric.compute(predictions=p.predictions, references=p.label_ids)
@@ -874,7 +888,8 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
         seed=training_args.seed,
         dtype=getattr(jnp, model_args.dtype),
     )
@@ -892,8 +907,8 @@ def main():
 
     # region Define train step functions
     def train_step(
-        state: train_state.TrainState, batch: Dict[str, Array], dropout_rng: PRNGKey
-    ) -> Tuple[train_state.TrainState, float]:
+        state: train_state.TrainState, batch: dict[str, Array], dropout_rng: PRNGKey
+    ) -> tuple[train_state.TrainState, float]:
         """Trains model with an optimizer (both in `state`) on `batch`, returning a pair `(new_state, loss)`."""
         dropout_rng, new_dropout_rng = jax.random.split(dropout_rng)
         start_positions = batch.pop("start_positions")
@@ -986,7 +1001,6 @@ def main():
                     position=2,
                 ):
                     _ = batch.pop("example_id")
-                    _ = batch.pop("offset_mapping")
                     predictions = pad_shard_unpad(p_eval_step)(
                         state, batch, min_device_batch=per_device_eval_batch_size
                     )
@@ -1020,7 +1034,13 @@ def main():
                     model.save_pretrained(training_args.output_dir, params=params)
                     tokenizer.save_pretrained(training_args.output_dir)
                     if training_args.push_to_hub:
-                        repo.push_to_hub(commit_message=f"Saving weights and logs of step {cur_step}", blocking=False)
+                        api.upload_folder(
+                            commit_message=f"Saving weights and logs of step {cur_step}",
+                            folder_path=training_args.output_dir,
+                            repo_id=repo_id,
+                            repo_type="model",
+                            token=training_args.hub_token,
+                        )
         epochs.desc = f"Epoch ... {epoch + 1}/{num_epochs}"
     # endregion
 
@@ -1035,7 +1055,6 @@ def main():
             eval_loader, total=math.ceil(len(eval_dataset) / eval_batch_size), desc="Evaluating ...", position=2
         ):
             _ = batch.pop("example_id")
-            _ = batch.pop("offset_mapping")
             predictions = pad_shard_unpad(p_eval_step)(state, batch, min_device_batch=per_device_eval_batch_size)
             start_logits = np.array(predictions[0])
             end_logits = np.array(predictions[1])

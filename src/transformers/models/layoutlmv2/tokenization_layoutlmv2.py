@@ -20,7 +20,7 @@ import sys
 import unicodedata
 from typing import Dict, List, Optional, Tuple, Union
 
-from ...tokenization_utils import PreTrainedTokenizer, _is_control, _is_punctuation, _is_whitespace
+from ...tokenization_utils import AddedToken, PreTrainedTokenizer, _is_control, _is_punctuation, _is_whitespace
 from ...tokenization_utils_base import (
     BatchEncoding,
     EncodedInput,
@@ -35,29 +35,6 @@ from ...utils import PaddingStrategy, TensorType, add_end_docstrings, logging
 logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.txt"}
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "microsoft/layoutlmv2-base-uncased": (
-            "https://huggingface.co/microsoft/layoutlmv2-base-uncased/resolve/main/vocab.txt"
-        ),
-        "microsoft/layoutlmv2-large-uncased": (
-            "https://huggingface.co/microsoft/layoutlmv2-large-uncased/resolve/main/vocab.txt"
-        ),
-    }
-}
-
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "microsoft/layoutlmv2-base-uncased": 512,
-    "microsoft/layoutlmv2-large-uncased": 512,
-}
-
-
-PRETRAINED_INIT_CONFIGURATION = {
-    "microsoft/layoutlmv2-base-uncased": {"do_lower_case": True},
-    "microsoft/layoutlmv2-large-uncased": {"do_lower_case": True},
-}
 
 
 LAYOUTLMV2_ENCODE_KWARGS_DOCSTRING = r"""
@@ -218,9 +195,6 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
-    pretrained_init_configuration = PRETRAINED_INIT_CONFIGURATION
 
     def __init__(
         self,
@@ -244,6 +218,35 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         additional_special_tokens: Optional[List[str]] = None,
         **kwargs,
     ):
+        sep_token = AddedToken(sep_token, special=True) if isinstance(sep_token, str) else sep_token
+        unk_token = AddedToken(unk_token, special=True) if isinstance(unk_token, str) else unk_token
+        pad_token = AddedToken(pad_token, special=True) if isinstance(pad_token, str) else pad_token
+        cls_token = AddedToken(cls_token, special=True) if isinstance(cls_token, str) else cls_token
+        mask_token = AddedToken(mask_token, special=True) if isinstance(mask_token, str) else mask_token
+
+        if not os.path.isfile(vocab_file):
+            raise ValueError(
+                f"Can't find a vocabulary file at path '{vocab_file}'. To load the vocabulary from a Google pretrained"
+                " model use `tokenizer = BertTokenizer.from_pretrained(PRETRAINED_MODEL_NAME)`"
+            )
+        self.vocab = load_vocab(vocab_file)
+        self.ids_to_tokens = collections.OrderedDict([(ids, tok) for tok, ids in self.vocab.items()])
+        self.do_basic_tokenize = do_basic_tokenize
+        if do_basic_tokenize:
+            self.basic_tokenizer = BasicTokenizer(
+                do_lower_case=do_lower_case,
+                never_split=never_split,
+                tokenize_chinese_chars=tokenize_chinese_chars,
+                strip_accents=strip_accents,
+            )
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=str(unk_token))
+
+        # additional properties
+        self.cls_token_box = cls_token_box
+        self.sep_token_box = sep_token_box
+        self.pad_token_box = pad_token_box
+        self.pad_token_label = pad_token_label
+        self.only_label_first_subword = only_label_first_subword
         super().__init__(
             do_lower_case=do_lower_case,
             do_basic_tokenize=do_basic_tokenize,
@@ -264,30 +267,6 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             additional_special_tokens=additional_special_tokens,
             **kwargs,
         )
-
-        if not os.path.isfile(vocab_file):
-            raise ValueError(
-                f"Can't find a vocabulary file at path '{vocab_file}'. To load the vocabulary from a Google pretrained"
-                " model use `tokenizer = BertTokenizer.from_pretrained(PRETRAINED_MODEL_NAME)`"
-            )
-        self.vocab = load_vocab(vocab_file)
-        self.ids_to_tokens = collections.OrderedDict([(ids, tok) for tok, ids in self.vocab.items()])
-        self.do_basic_tokenize = do_basic_tokenize
-        if do_basic_tokenize:
-            self.basic_tokenizer = BasicTokenizer(
-                do_lower_case=do_lower_case,
-                never_split=never_split,
-                tokenize_chinese_chars=tokenize_chinese_chars,
-                strip_accents=strip_accents,
-            )
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=self.unk_token)
-
-        # additional properties
-        self.cls_token_box = cls_token_box
-        self.sep_token_box = sep_token_box
-        self.pad_token_box = pad_token_box
-        self.pad_token_label = pad_token_label
-        self.only_label_first_subword = only_label_first_subword
 
     @property
     def do_lower_case(self):
@@ -427,7 +406,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         self,
         text: Union[TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]],
         text_pair: Optional[Union[PreTokenizedInput, List[PreTokenizedInput]]] = None,
-        boxes: Union[List[List[int]], List[List[List[int]]]] = None,
+        boxes: Optional[Union[List[List[int]], List[List[List[int]]]]] = None,
         word_labels: Optional[Union[List[int], List[List[int]]]] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
@@ -435,6 +414,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -538,6 +518,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
                 max_length=max_length,
                 stride=stride,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_tensors=return_tensors,
                 return_token_type_ids=return_token_type_ids,
                 return_attention_mask=return_attention_mask,
@@ -560,6 +541,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
                 max_length=max_length,
                 stride=stride,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_tensors=return_tensors,
                 return_token_type_ids=return_token_type_ids,
                 return_attention_mask=return_attention_mask,
@@ -579,7 +561,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             List[TextInputPair],
             List[PreTokenizedInput],
         ],
-        is_pair: bool = None,
+        is_pair: Optional[bool] = None,
         boxes: Optional[List[List[List[int]]]] = None,
         word_labels: Optional[Union[List[int], List[List[int]]]] = None,
         add_special_tokens: bool = True,
@@ -588,6 +570,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -619,6 +602,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             return_token_type_ids=return_token_type_ids,
             return_attention_mask=return_attention_mask,
@@ -637,7 +621,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             List[TextInputPair],
             List[PreTokenizedInput],
         ],
-        is_pair: bool = None,
+        is_pair: Optional[bool] = None,
         boxes: Optional[List[List[List[int]]]] = None,
         word_labels: Optional[List[List[int]]] = None,
         add_special_tokens: bool = True,
@@ -646,6 +630,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -674,6 +659,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
             return_token_type_ids=return_token_type_ids,
             return_overflowing_tokens=return_overflowing_tokens,
@@ -689,7 +675,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
     def _batch_prepare_for_model(
         self,
         batch_text_or_text_pairs,
-        is_pair: bool = None,
+        is_pair: Optional[bool] = None,
         boxes: Optional[List[List[int]]] = None,
         word_labels: Optional[List[List[int]]] = None,
         add_special_tokens: bool = True,
@@ -698,6 +684,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[str] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -729,6 +716,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
                 max_length=max_length,
                 stride=stride,
                 pad_to_multiple_of=None,  # we pad in batch afterward
+                padding_side=None,  # we pad in batch afterward
                 return_attention_mask=False,  # we pad in batch afterward
                 return_token_type_ids=return_token_type_ids,
                 return_overflowing_tokens=return_overflowing_tokens,
@@ -749,6 +737,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             padding=padding_strategy.value,
             max_length=max_length,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
         )
 
@@ -769,6 +758,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -790,6 +780,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             return_token_type_ids=return_token_type_ids,
             return_attention_mask=return_attention_mask,
@@ -816,6 +807,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -859,6 +851,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             return_token_type_ids=return_token_type_ids,
             return_attention_mask=return_attention_mask,
@@ -882,6 +875,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -912,6 +906,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             prepend_batch_axis=True,
             return_attention_mask=return_attention_mask,
@@ -935,6 +930,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -1121,6 +1117,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
                 max_length=max_length,
                 padding=padding_strategy.value,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
 
@@ -1264,6 +1261,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_attention_mask: Optional[bool] = None,
     ) -> dict:
         """
@@ -1286,6 +1284,9 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
             pad_to_multiple_of: (optional) Integer if set will pad the sequence to a multiple of the provided value.
                 This is especially useful to enable the use of Tensor Core on NVIDIA hardware with compute capability
                 `>= 7.5` (Volta).
+            padding_side:
+                The side on which the model should have padding applied. Should be selected between ['right', 'left'].
+                Default value is picked from the class attribute of the same name.
             return_attention_mask:
                 (optional) Set to False to avoid returning attention mask (default: set to model specifics)
         """
@@ -1309,7 +1310,8 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
 
         if needs_to_be_padded:
             difference = max_length - len(required_input)
-            if self.padding_side == "right":
+            padding_side = padding_side if padding_side is not None else self.padding_side
+            if padding_side == "right":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"] + [0] * difference
                 if "token_type_ids" in encoded_inputs:
@@ -1323,7 +1325,7 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
                 if "special_tokens_mask" in encoded_inputs:
                     encoded_inputs["special_tokens_mask"] = encoded_inputs["special_tokens_mask"] + [1] * difference
                 encoded_inputs[self.model_input_names[0]] = required_input + [self.pad_token_id] * difference
-            elif self.padding_side == "left":
+            elif padding_side == "left":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = [0] * difference + encoded_inputs["attention_mask"]
                 if "token_type_ids" in encoded_inputs:
@@ -1338,13 +1340,13 @@ class LayoutLMv2Tokenizer(PreTrainedTokenizer):
                     encoded_inputs["special_tokens_mask"] = [1] * difference + encoded_inputs["special_tokens_mask"]
                 encoded_inputs[self.model_input_names[0]] = [self.pad_token_id] * difference + required_input
             else:
-                raise ValueError("Invalid padding strategy:" + str(self.padding_side))
+                raise ValueError("Invalid padding strategy:" + str(padding_side))
 
         return encoded_inputs
 
 
 # Copied from transformers.models.bert.tokenization_bert.BasicTokenizer
-class BasicTokenizer(object):
+class BasicTokenizer:
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -1362,20 +1364,30 @@ class BasicTokenizer(object):
         strip_accents (`bool`, *optional*):
             Whether or not to strip all accents. If this option is not specified, then it will be determined by the
             value for `lowercase` (as in the original BERT).
+        do_split_on_punc (`bool`, *optional*, defaults to `True`):
+            In some instances we want to skip the basic punctuation splitting so that later tokenization can capture
+            the full context of the words, such as contractions.
     """
 
-    def __init__(self, do_lower_case=True, never_split=None, tokenize_chinese_chars=True, strip_accents=None):
+    def __init__(
+        self,
+        do_lower_case=True,
+        never_split=None,
+        tokenize_chinese_chars=True,
+        strip_accents=None,
+        do_split_on_punc=True,
+    ):
         if never_split is None:
             never_split = []
         self.do_lower_case = do_lower_case
         self.never_split = set(never_split)
         self.tokenize_chinese_chars = tokenize_chinese_chars
         self.strip_accents = strip_accents
+        self.do_split_on_punc = do_split_on_punc
 
     def tokenize(self, text, never_split=None):
         """
-        Basic Tokenization of a piece of text. Split on "white spaces" only, for sub-word tokenization, see
-        WordPieceTokenizer.
+        Basic Tokenization of a piece of text. For sub-word tokenization, see WordPieceTokenizer.
 
         Args:
             never_split (`List[str]`, *optional*)
@@ -1394,7 +1406,9 @@ class BasicTokenizer(object):
         # words in the English Wikipedia.).
         if self.tokenize_chinese_chars:
             text = self._tokenize_chinese_chars(text)
-        orig_tokens = whitespace_tokenize(text)
+        # prevents treating the same character with different unicode codepoints as different characters
+        unicode_normalized_text = unicodedata.normalize("NFC", text)
+        orig_tokens = whitespace_tokenize(unicode_normalized_text)
         split_tokens = []
         for token in orig_tokens:
             if token not in never_split:
@@ -1422,7 +1436,7 @@ class BasicTokenizer(object):
 
     def _run_split_on_punc(self, text, never_split=None):
         """Splits punctuation on a piece of text."""
-        if never_split is not None and text in never_split:
+        if not self.do_split_on_punc or (never_split is not None and text in never_split):
             return [text]
         chars = list(text)
         i = 0
@@ -1494,7 +1508,7 @@ class BasicTokenizer(object):
 
 
 # Copied from transformers.models.bert.tokenization_bert.WordpieceTokenizer
-class WordpieceTokenizer(object):
+class WordpieceTokenizer:
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):
@@ -1507,7 +1521,7 @@ class WordpieceTokenizer(object):
         Tokenizes a piece of text into its word pieces. This uses a greedy longest-match-first algorithm to perform
         tokenization using the given vocabulary.
 
-        For example, `input = "unaffable"` wil return as output `["un", "##aff", "##able"]`.
+        For example, `input = "unaffable"` will return as output `["un", "##aff", "##able"]`.
 
         Args:
             text: A single token or whitespace separated tokens. This should have
@@ -1549,3 +1563,6 @@ class WordpieceTokenizer(object):
             else:
                 output_tokens.extend(sub_tokens)
         return output_tokens
+
+
+__all__ = ["LayoutLMv2Tokenizer"]

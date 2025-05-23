@@ -14,32 +14,23 @@
 # limitations under the License.
 """Tokenization classes for RemBERT."""
 
-
 import os
 from shutil import copyfile
 from typing import List, Optional, Tuple
 
 import sentencepiece as spm
 
-from ...tokenization_utils import PreTrainedTokenizer
+from ...tokenization_utils import AddedToken, PreTrainedTokenizer
 from ...utils import logging
+from ...utils.import_utils import requires
 
 
 logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "sentencepiece.model"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "google/rembert": "https://huggingface.co/google/rembert/resolve/main/sentencepiece.model",
-    },
-}
 
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "google/rembert": 256,
-}
-
-
+@requires(backends=("sentencepiece",))
 class RemBertTokenizer(PreTrainedTokenizer):
     """
     Construct a RemBERT tokenizer. Based on [SentencePiece](https://github.com/google/sentencepiece).
@@ -93,8 +84,6 @@ class RemBertTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(
         self,
@@ -111,6 +100,16 @@ class RemBertTokenizer(PreTrainedTokenizer):
         mask_token="[MASK]",
         **kwargs,
     ):
+        # Mask token behave like a normal word, i.e. include the space before it
+        mask_token = AddedToken(mask_token, lstrip=True, rstrip=False) if isinstance(mask_token, str) else mask_token
+
+        self.do_lower_case = do_lower_case
+        self.remove_space = remove_space
+        self.keep_accents = keep_accents
+        self.vocab_file = vocab_file
+
+        self.sp_model = spm.SentencePieceProcessor()
+        self.sp_model.Load(vocab_file)
         super().__init__(
             do_lower_case=do_lower_case,
             remove_space=remove_space,
@@ -124,14 +123,6 @@ class RemBertTokenizer(PreTrainedTokenizer):
             mask_token=mask_token,
             **kwargs,
         )
-
-        self.do_lower_case = do_lower_case
-        self.remove_space = remove_space
-        self.keep_accents = keep_accents
-        self.vocab_file = vocab_file
-
-        self.sp_model = spm.SentencePieceProcessor()
-        self.sp_model.Load(vocab_file)
 
     @property
     def vocab_size(self):
@@ -263,7 +254,14 @@ class RemBertTokenizer(PreTrainedTokenizer):
             save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["vocab_file"]
         )
 
-        if os.path.abspath(self.vocab_file) != os.path.abspath(out_vocab_file):
+        if os.path.abspath(self.vocab_file) != os.path.abspath(out_vocab_file) and os.path.isfile(self.vocab_file):
             copyfile(self.vocab_file, out_vocab_file)
+        elif not os.path.isfile(self.vocab_file):
+            with open(out_vocab_file, "wb") as fi:
+                content_spiece_model = self.sp_model.serialized_model_proto()
+                fi.write(content_spiece_model)
 
         return (out_vocab_file,)
+
+
+__all__ = ["RemBertTokenizer"]

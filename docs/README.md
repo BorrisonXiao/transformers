@@ -81,10 +81,10 @@ The `preview` command only works with existing doc files. When you add a complet
 
 ## Adding a new element to the navigation bar
 
-Accepted files are Markdown (.md or .md).
+Accepted files are Markdown (.md).
 
 Create a file with its extension and put it in the source directory. You can then link it to the toc-tree by putting
-the filename without the extension in the [`_toctree.yml`](https://github.com/huggingface/transformers/blob/main/docs/source/_toctree.yml) file.
+the filename without the extension in the [`_toctree.yml`](https://github.com/huggingface/transformers/blob/main/docs/source/en/_toctree.yml) file.
 
 ## Renaming section headers and moving sections
 
@@ -147,7 +147,7 @@ When adding a new model:
 - Add the classes that should be linked in the model. This generally includes the configuration, the tokenizer, and
   every model of that class (the base model, alongside models with additional heads), both in PyTorch and TensorFlow.
   The order is generally:
-    - Configuration,
+    - Configuration
     - Tokenizer
     - PyTorch base model
     - PyTorch head models
@@ -202,7 +202,7 @@ provide its path. For instance: \[\`utils.ModelOutput\`\]. This will be converte
 `utils.ModelOutput` in the description. To get rid of the path and only keep the name of the object you are
 linking to in the description, add a ~: \[\`~utils.ModelOutput\`\] will generate a link with `ModelOutput` in the description.
 
-The same works for methods so you can either use \[\`XXXClass.method\`\] or \[~\`XXXClass.method\`\].
+The same works for methods so you can either use \[\`XXXClass.method\`\] or \[\`~XXXClass.method\`\].
 
 #### Defining arguments in a method
 
@@ -250,7 +250,7 @@ then its documentation should look like this:
 
 Note that we always omit the "defaults to \`None\`" when None is the default for any argument. Also note that even
 if the first line describing your argument type and its default gets long, you can't break it on several lines. You can
-however write as many lines as you want in the indented description (see the example above with `input_ids`).
+however, write as many lines as you want in the indented description (see the example above with `input_ids`).
 
 #### Writing a multi-line code block
 
@@ -276,14 +276,14 @@ building the return.
 
 Here's an example of a single value return:
 
-```
+```python
     Returns:
         `List[int]`: A list of integers in the range [0, 1] --- 1 for a special token, 0 for a sequence token.
 ```
 
 Here's an example of a tuple return, comprising several objects:
 
-```
+```python
     Returns:
         `tuple(torch.FloatTensor)` comprising various elements depending on the configuration ([`BertConfig`]) and inputs:
         - ** loss** (*optional*, returned when `masked_lm_labels` is provided) `torch.FloatTensor` of shape `(1,)` --
@@ -322,10 +322,9 @@ includes an example of how to transcribe speech to text in the
 
 The syntax for Example docstrings can look as follows:
 
-```
+```python
     Example:
 
-    ```python
     >>> from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
     >>> from datasets import load_dataset
     >>> import torch
@@ -347,7 +346,6 @@ The syntax for Example docstrings can look as follows:
     >>> transcription = processor.batch_decode(predicted_ids)
     >>> transcription[0]
     'MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL'
-    ```
 ```
 
 The docstring should give a minimal, clear example of how the respective model 
@@ -363,9 +361,6 @@ To do so each example should be included in the doctests.
 We use pytests' [doctest integration](https://docs.pytest.org/doctest.html) to verify that all of our examples run correctly. 
 For Transformers, the doctests are run on a daily basis via GitHub Actions as can be 
 seen [here](https://github.com/huggingface/transformers/actions/workflows/doctests.yml).
-
-To include your example in the daily doctests, you need to add the filename that
-contains the example docstring to the [documentation_tests.txt](../utils/documentation_tests.txt).
 
 ### For Python files
 

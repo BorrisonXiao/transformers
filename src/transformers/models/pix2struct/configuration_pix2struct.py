@@ -12,23 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Pix2Struct model configuration"""
-
-import copy
-import os
-from typing import Union
+"""Pix2Struct model configuration"""
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-PIX2STRUCT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "google/pix2struct-textcaps-base": (
-        "https://huggingface.co/google/pix2struct-textcaps-base/resolve/main/config.json"
-    ),
-}
 
 
 class Pix2StructTextConfig(PretrainedConfig):
@@ -60,7 +50,7 @@ class Pix2StructTextConfig(PretrainedConfig):
         relative_attention_max_distance (`int`, *optional*, defaults to 128):
             The maximum distance of the longer sequences for the bucket separation.
         dropout_rate (`float`, *optional*, defaults to 0.1):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         layer_norm_epsilon (`float`, *optional*, defaults to 1e-6):
             The epsilon used by the layer normalization layers.
         initializer_factor (`float`, *optional*, defaults to 1.0):
@@ -91,12 +81,17 @@ class Pix2StructTextConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "pix2struct_text_model"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {
         "hidden_size": "hidden_size",
         "num_attention_heads": "num_heads",
         "num_hidden_layers": "num_layers",
+        "decoder_attention_heads": "num_heads",
+        "encoder_attention_heads": "num_heads",
+        "encoder_layers": "num_layers",
+        "decoder_layers": "num_layers",
     }
 
     def __init__(
@@ -149,26 +144,6 @@ class Pix2StructTextConfig(PretrainedConfig):
             **kwargs,
         )
 
-    @classmethod
-    def from_pretrained(
-        cls, pretrainehidden_size_name_or_path: Union[str, os.PathLike], **kwargs
-    ) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrainehidden_size_name_or_path, **kwargs)
-
-        # get the text config dict if we are loading from Pix2StructConfig
-        if config_dict.get("model_type") == "pix2struct":
-            config_dict = config_dict["text_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
 
 class Pix2StructVisionConfig(PretrainedConfig):
     r"""
@@ -195,16 +170,16 @@ class Pix2StructVisionConfig(PretrainedConfig):
             Number of attention heads for each attention layer in the Transformer encoder.
         dense_act_fn (`str` or `function`, *optional*, defaults to `"gelu_new"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"gelu"` are supported.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-6):
+            `"relu"`, `"selu"` and `"gelu_new"` `"gelu"` are supported.
+        layer_norm_eps (`float`, *optional*, defaults to 1e-06):
             The epsilon used by the layer normalization layers.
         dropout_rate (`float`, *optional*, defaults to 0.0):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 1e-10):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1.0):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
         seq_len (`int`, *optional*, defaults to 4096):
@@ -268,26 +243,6 @@ class Pix2StructVisionConfig(PretrainedConfig):
         self.relative_attention_max_distance = relative_attention_max_distance
         self.d_kv = d_kv
 
-    @classmethod
-    def from_pretrained(
-        cls, pretrainehidden_size_name_or_path: Union[str, os.PathLike], **kwargs
-    ) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrainehidden_size_name_or_path, **kwargs)
-
-        # get the vision config dict if we are loading from Pix2StructConfig
-        if config_dict.get("model_type") == "pix2struct":
-            config_dict = config_dict["vision_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
 
 class Pix2StructConfig(PretrainedConfig):
     r"""
@@ -338,7 +293,6 @@ class Pix2StructConfig(PretrainedConfig):
     ```"""
 
     model_type = "pix2struct"
-    is_composition = True
 
     def __init__(
         self,
@@ -361,6 +315,8 @@ class Pix2StructConfig(PretrainedConfig):
             vision_config = {}
             logger.info("vision_config is None. Initializing the Pix2StructVisionConfig with default values.")
 
+        text_config["is_encoder_decoder"] = is_encoder_decoder
+        text_config["tie_word_embeddings"] = tie_word_embeddings
         self.text_config = Pix2StructTextConfig(**text_config)
         self.vision_config = Pix2StructVisionConfig(**vision_config)
 
@@ -390,15 +346,5 @@ class Pix2StructConfig(PretrainedConfig):
 
         return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
 
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
 
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["text_config"] = self.text_config.to_dict()
-        output["vision_config"] = self.vision_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output
+__all__ = ["Pix2StructConfig", "Pix2StructTextConfig", "Pix2StructVisionConfig"]

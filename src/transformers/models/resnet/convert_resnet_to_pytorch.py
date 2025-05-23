@@ -14,13 +14,12 @@
 # limitations under the License.
 """Convert ResNet checkpoints from timm."""
 
-
 import argparse
 import json
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import timm
 import torch
@@ -28,7 +27,7 @@ import torch.nn as nn
 from huggingface_hub import hf_hub_download
 from torch import Tensor
 
-from transformers import AutoFeatureExtractor, ResNetConfig, ResNetForImageClassification
+from transformers import AutoImageProcessor, ResNetConfig, ResNetForImageClassification
 from transformers.utils import logging
 
 
@@ -88,7 +87,7 @@ class ModuleTransfer:
         for dest_m, src_m in zip(dest_traced, src_traced):
             dest_m.load_state_dict(src_m.state_dict())
             if self.verbose == 1:
-                print(f"Transfered from={src_m} to={dest_m}")
+                print(f"Transferred from={src_m} to={dest_m}")
 
 
 def convert_weight_and_push(name: str, config: ResNetConfig, save_directory: Path, push_to_hub: bool = True):
@@ -113,17 +112,17 @@ def convert_weight_and_push(name: str, config: ResNetConfig, save_directory: Pat
         )
 
         # we can use the convnext one
-        feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/convnext-base-224-22k-1k")
-        feature_extractor.push_to_hub(
+        image_processor = AutoImageProcessor.from_pretrained("facebook/convnext-base-224-22k-1k")
+        image_processor.push_to_hub(
             repo_path_or_name=save_directory / checkpoint_name,
-            commit_message="Add feature extractor",
+            commit_message="Add image processor",
             use_temp_dir=True,
         )
 
         print(f"Pushed {checkpoint_name}")
 
 
-def convert_weights_and_push(save_directory: Path, model_name: str = None, push_to_hub: bool = True):
+def convert_weights_and_push(save_directory: Path, model_name: Optional[str] = None, push_to_hub: bool = True):
     filename = "imagenet-1k-id2label.json"
     num_labels = 1000
     expected_shape = (1, num_labels)
@@ -191,7 +190,7 @@ if __name__ == "__main__":
         default=True,
         type=bool,
         required=False,
-        help="If True, push model and feature extractor to the hub.",
+        help="If True, push model and image processor to the hub.",
     )
 
     args = parser.parse_args()

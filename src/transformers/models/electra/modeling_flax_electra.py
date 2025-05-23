@@ -230,7 +230,7 @@ class FlaxElectraSelfAttention(nn.Module):
     def _concatenate_to_cache(self, key, value, query, attention_mask):
         """
         This function takes projected key, value states from a single input token and concatenates the states to cached
-        states from previous steps. This function is slighly adapted from the official Flax repository:
+        states from previous steps. This function is slightly adapted from the official Flax repository:
         https://github.com/google/flax/blob/491ce18759622506588784b4fca0e4bf05f8c8cd/flax/linen/attention.py#L252
         """
         # detect if we're initializing by absence of existing cache data.
@@ -263,7 +263,7 @@ class FlaxElectraSelfAttention(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
-        key_value_states: Optional[jnp.array] = None,
+        key_value_states: Optional[jnp.ndarray] = None,
         init_cache: bool = False,
         deterministic=True,
         output_attentions: bool = False,
@@ -777,13 +777,13 @@ class FlaxElectraPreTrainedModel(FlaxPreTrainedModel):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
-        params: dict = None,
+        params: Optional[dict] = None,
         dropout_rng: jax.random.PRNGKey = None,
         train: bool = False,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        past_key_values: dict = None,
+        past_key_values: Optional[dict] = None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1196,6 +1196,7 @@ class FlaxElectraSequenceSummary(nn.Module):
             - **summary_first_dropout** (`float`) -- Optional dropout probability before the projection and activation.
             - **summary_last_dropout** (`float`)-- Optional dropout probability after the projection and activation.
     """
+
     config: ElectraConfig
     dtype: jnp.dtype = jnp.float32
 
@@ -1228,15 +1229,15 @@ class FlaxElectraSequenceSummary(nn.Module):
         Compute a single vector summary of a sequence hidden states.
 
         Args:
-            hidden_states (`jnp.array` of shape `[batch_size, seq_len, hidden_size]`):
+            hidden_states (`jnp.ndarray` of shape `[batch_size, seq_len, hidden_size]`):
                 The hidden states of the last layer.
-            cls_index (`jnp.array` of shape `[batch_size]` or `[batch_size, ...]` where ... are optional leading dimensions of `hidden_states`, *optional*):
+            cls_index (`jnp.ndarray` of shape `[batch_size]` or `[batch_size, ...]` where ... are optional leading dimensions of `hidden_states`, *optional*):
                 Used if `summary_type == "cls_index"` and takes the last token of the sequence as classification token.
 
         Returns:
-            `jnp.array`: The summary of the sequence hidden states.
+            `jnp.ndarray`: The summary of the sequence hidden states.
         """
-        # NOTE: this doest "first" type summary always
+        # NOTE: this does "first" type summary always
         output = hidden_states[:, 0]
         output = self.first_dropout(output, deterministic=deterministic)
         output = self.summary(output)
@@ -1363,7 +1364,7 @@ class FlaxElectraForQuestionAnsweringModule(nn.Module):
         )
         hidden_states = outputs[0]
         logits = self.qa_outputs(hidden_states)
-        start_logits, end_logits = logits.split(self.config.num_labels, axis=-1)
+        start_logits, end_logits = jnp.split(logits, self.config.num_labels, axis=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
 
@@ -1565,7 +1566,7 @@ class FlaxElectraForCausalLMModule(nn.Module):
 class FlaxElectraForCausalLM(FlaxElectraPreTrainedModel):
     module_class = FlaxElectraForCausalLMModule
 
-    def prepare_inputs_for_generation(self, input_ids, max_length, attention_mask: Optional[jnp.DeviceArray] = None):
+    def prepare_inputs_for_generation(self, input_ids, max_length, attention_mask: Optional[jax.Array] = None):
         # initializing the cache
         batch_size, seq_length = input_ids.shape
 
@@ -1598,3 +1599,16 @@ append_call_sample_docstring(
     FlaxCausalLMOutputWithCrossAttentions,
     _CONFIG_FOR_DOC,
 )
+
+
+__all__ = [
+    "FlaxElectraForCausalLM",
+    "FlaxElectraForMaskedLM",
+    "FlaxElectraForMultipleChoice",
+    "FlaxElectraForPreTraining",
+    "FlaxElectraForQuestionAnswering",
+    "FlaxElectraForSequenceClassification",
+    "FlaxElectraForTokenClassification",
+    "FlaxElectraModel",
+    "FlaxElectraPreTrainedModel",
+]

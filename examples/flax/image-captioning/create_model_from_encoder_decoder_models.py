@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2022 The HuggingFace Team All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -37,7 +36,7 @@ class ModelArguments:
     encoder_model_name_or_path: str = field(
         metadata={
             "help": (
-                "The encoder model checkpoint for weights initialization."
+                "The encoder model checkpoint for weights initialization. "
                 "Don't set if you want to train an encoder model from scratch."
             )
         },
@@ -45,7 +44,7 @@ class ModelArguments:
     decoder_model_name_or_path: str = field(
         metadata={
             "help": (
-                "The decoder model checkpoint for weights initialization."
+                "The decoder model checkpoint for weights initialization. "
                 "Don't set if you want to train a decoder model from scratch."
             )
         },

@@ -15,7 +15,6 @@
 """Convert MaskFormer checkpoints with ResNet backbone from the original repository. URL:
 https://github.com/facebookresearch/MaskFormer"""
 
-
 import argparse
 import json
 import pickle
@@ -26,7 +25,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from PIL import Image
 
-from transformers import MaskFormerConfig, MaskFormerFeatureExtractor, MaskFormerForInstanceSegmentation, ResNetConfig
+from transformers import MaskFormerConfig, MaskFormerForInstanceSegmentation, MaskFormerImageProcessor, ResNetConfig
 from transformers.utils import logging
 
 
@@ -126,31 +125,31 @@ def create_rename_keys(config):
             for i in range(3):
                 rename_keys.append(
                     (
-                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i+1}.weight",
+                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i + 1}.weight",
                         f"model.pixel_level_module.encoder.encoder.stages.{stage_idx}.layers.{layer_idx}.layer.{i}.convolution.weight",
                     )
                 )
                 rename_keys.append(
                     (
-                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i+1}.norm.weight",
+                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i + 1}.norm.weight",
                         f"model.pixel_level_module.encoder.encoder.stages.{stage_idx}.layers.{layer_idx}.layer.{i}.normalization.weight",
                     )
                 )
                 rename_keys.append(
                     (
-                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i+1}.norm.bias",
+                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i + 1}.norm.bias",
                         f"model.pixel_level_module.encoder.encoder.stages.{stage_idx}.layers.{layer_idx}.layer.{i}.normalization.bias",
                     )
                 )
                 rename_keys.append(
                     (
-                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i+1}.norm.running_mean",
+                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i + 1}.norm.running_mean",
                         f"model.pixel_level_module.encoder.encoder.stages.{stage_idx}.layers.{layer_idx}.layer.{i}.normalization.running_mean",
                     )
                 )
                 rename_keys.append(
                     (
-                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i+1}.norm.running_var",
+                        f"backbone.res{stage_idx + 2}.{layer_idx}.conv{i + 1}.norm.running_var",
                         f"model.pixel_level_module.encoder.encoder.stages.{stage_idx}.layers.{layer_idx}.layer.{i}.normalization.running_var",
                     )
                 )
@@ -296,10 +295,10 @@ def convert_maskformer_checkpoint(
         ignore_index = 65535
     else:
         ignore_index = 255
-    reduce_labels = True if "ade" in model_name else False
-    feature_extractor = MaskFormerFeatureExtractor(ignore_index=ignore_index, reduce_labels=reduce_labels)
+    do_reduce_labels = True if "ade" in model_name else False
+    image_processor = MaskFormerImageProcessor(ignore_index=ignore_index, do_reduce_labels=do_reduce_labels)
 
-    inputs = feature_extractor(image, return_tensors="pt")
+    inputs = image_processor(image, return_tensors="pt")
 
     outputs = model(**inputs)
 
@@ -340,15 +339,15 @@ def convert_maskformer_checkpoint(
     print("Looks ok!")
 
     if pytorch_dump_folder_path is not None:
-        print(f"Saving model and feature extractor of {model_name} to {pytorch_dump_folder_path}")
+        print(f"Saving model and image processor of {model_name} to {pytorch_dump_folder_path}")
         Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
         model.save_pretrained(pytorch_dump_folder_path)
-        feature_extractor.save_pretrained(pytorch_dump_folder_path)
+        image_processor.save_pretrained(pytorch_dump_folder_path)
 
     if push_to_hub:
-        print(f"Pushing model and feature extractor of {model_name} to the hub...")
+        print(f"Pushing model and image processor of {model_name} to the hub...")
         model.push_to_hub(f"facebook/{model_name}")
-        feature_extractor.push_to_hub(f"facebook/{model_name}")
+        image_processor.push_to_hub(f"facebook/{model_name}")
 
 
 if __name__ == "__main__":
@@ -375,7 +374,8 @@ if __name__ == "__main__":
         "--checkpoint_path",
         type=str,
         required=True,
-        help=("Path to the original pickle file (.pkl) of the original checkpoint.",),
+        help="Path to the original pickle file (.pkl) of the original checkpoint.\n"
+        "Given the files are in the pickle format, please be wary of passing it files you trust.",
     )
     parser.add_argument(
         "--pytorch_dump_folder_path", default=None, type=str, help="Path to the output PyTorch model directory."

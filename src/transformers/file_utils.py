@@ -17,13 +17,15 @@ File utilities: utilities related to download and cache models
 This module should not be update anymore and is only left for backward compatibility.
 """
 
+from huggingface_hub import get_full_repo_name  # for backward compatibility
+from huggingface_hub.constants import HF_HUB_DISABLE_TELEMETRY as DISABLE_TELEMETRY  # for backward compatibility
+
 from . import __version__
 
 # Backward compatibility imports, to make sure all those objects can be found in file_utils
 from .utils import (
     CLOUDFRONT_DISTRIB_PREFIX,
     CONFIG_NAME,
-    DISABLE_TELEMETRY,
     DUMMY_INPUTS,
     DUMMY_MASK,
     ENV_VARS_TRUE_AND_AUTO_VALUES,
@@ -69,9 +71,6 @@ from .utils import (
     copy_func,
     default_cache_path,
     define_sagemaker_information,
-    get_cached_models,
-    get_file_from_repo,
-    get_full_repo_name,
     get_torch_version,
     has_file,
     http_user_agent,
@@ -83,6 +82,7 @@ from .utils import (
     is_faiss_available,
     is_flax_available,
     is_ftfy_available,
+    is_g2p_en_available,
     is_in_notebook,
     is_ipex_available,
     is_librosa_available,
@@ -101,8 +101,9 @@ from .utils import (
     is_sagemaker_mp_enabled,
     is_scipy_available,
     is_sentencepiece_available,
+    is_seqio_available,
     is_sklearn_available,
-    is_soundfile_availble,
+    is_soundfile_available,
     is_spacy_available,
     is_speech_available,
     is_tensor,
@@ -116,8 +117,9 @@ from .utils import (
     is_torch_cuda_available,
     is_torch_fx_available,
     is_torch_fx_proxy,
+    is_torch_mps_available,
     is_torch_tf32_available,
-    is_torch_tpu_available,
+    is_torch_xla_available,
     is_torchaudio_available,
     is_training_run_on_sagemaker,
     is_vision_available,

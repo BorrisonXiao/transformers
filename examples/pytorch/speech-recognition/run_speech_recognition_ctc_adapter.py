@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" Fine-tuning a 🤗 Transformers CTC adapter model for automatic speech recognition"""
+"""Fine-tuning a 🤗 Transformers CTC adapter model for automatic speech recognition"""
 
 import functools
 import json
@@ -24,7 +23,7 @@ import re
 import sys
 import warnings
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import datasets
 import evaluate
@@ -53,7 +52,7 @@ from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.31.0.dev0")
+check_min_version("4.53.0.dev0")
 
 require_version("datasets>=1.18.0", "To fix: pip install -r examples/pytorch/speech-recognition/requirements.txt")
 
@@ -90,8 +89,8 @@ class ModelArguments:
         default=0.05,
         metadata={
             "help": (
-                "Probability of each feature vector along the time axis to be chosen as the start of the vector"
-                "span to be masked. Approximately ``mask_time_prob * sequence_length // mask_time_length`` feature"
+                "Probability of each feature vector along the time axis to be chosen as the start of the vector "
+                "span to be masked. Approximately ``mask_time_prob * sequence_length // mask_time_length`` feature "
                 "vectors will be masked along the time axis."
             )
         },
@@ -146,7 +145,7 @@ class DataTrainingArguments:
                 " should be trained on in ISO 693-3 code, e.g. `tur` for Turkish"
                 " Wav2Vec2's MMS ISO codes can be looked up here: https://dl.fbaipublicfiles.com/mms/misc/language_coverage_mms.html"
                 " If you are not training the adapter layers on a language, simply choose"
-                " another accronym that fits your data."
+                " another acronym that fits your data."
             )
         },
     )
@@ -201,11 +200,11 @@ class DataTrainingArguments:
             )
         },
     )
-    chars_to_ignore: Optional[List[str]] = list_field(
+    chars_to_ignore: Optional[list[str]] = list_field(
         default=None,
         metadata={"help": "A list of characters to remove from the transcripts."},
     )
-    eval_metrics: List[str] = list_field(
+    eval_metrics: list[str] = list_field(
         default=["wer"],
         metadata={"help": "A list of metrics the model should be evaluated on. E.g. `'wer cer'`"},
     )
@@ -232,12 +231,22 @@ class DataTrainingArguments:
             )
         },
     )
-    use_auth_token: bool = field(
+    token: str = field(
+        default=None,
+        metadata={
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
+        },
+    )
+    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "If :obj:`True`, will use the token generated when running"
-                ":obj:`huggingface-cli login` as HTTP bearer authorization for remote files."
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -265,7 +274,7 @@ class DataCollatorCTCWithPadding:
     Data collator that will dynamically pad the inputs received.
     Args:
         processor (:class:`~transformers.AutoProcessor`)
-            The processor used for proccessing the data.
+            The processor used for processing the data.
         padding (:obj:`bool`, :obj:`str` or :class:`~transformers.tokenization_utils_base.PaddingStrategy`, `optional`, defaults to :obj:`True`):
             Select a strategy to pad the returned sequences (according to the model's padding side and padding index)
             among:
@@ -290,8 +299,8 @@ class DataCollatorCTCWithPadding:
     pad_to_multiple_of: Optional[int] = None
     pad_to_multiple_of_labels: Optional[int] = None
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-        # split inputs and labels since they have to be of different lenghts and need
+    def __call__(self, features: list[dict[str, Union[list[int], torch.Tensor]]]) -> dict[str, torch.Tensor]:
+        # split inputs and labels since they have to be of different lengths and need
         # different padding methods
         input_features = [{"input_values": feature["input_values"]} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
@@ -404,8 +413,8 @@ def main():
 
     # Log on each process the small summary:
     logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     # Set the verbosity to info of the Transformers logger (on main process only):
     if is_main_process(training_args.local_rank):
@@ -423,7 +432,8 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             split=data_args.train_split_name,
-            use_auth_token=data_args.use_auth_token,
+            token=data_args.token,
+            trust_remote_code=data_args.trust_remote_code,
         )
 
         if data_args.audio_column_name not in raw_datasets["train"].column_names:
@@ -448,7 +458,8 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             split=data_args.eval_split_name,
-            use_auth_token=data_args.use_auth_token,
+            token=data_args.token,
+            trust_remote_code=data_args.trust_remote_code,
         )
 
         if data_args.max_eval_samples is not None:
@@ -459,7 +470,7 @@ def main():
     # E.g. characters, such as `,` and `.` do not really have an acoustic characteristic
     # that could be easily picked up by the model
     chars_to_ignore_regex = (
-        f'[{"".join(data_args.chars_to_ignore)}]' if data_args.chars_to_ignore is not None else None
+        f"[{''.join(data_args.chars_to_ignore)}]" if data_args.chars_to_ignore is not None else None
     )
     text_column_name = data_args.text_column_name
 
@@ -486,7 +497,10 @@ def main():
     # the tokenizer
     # load config
     config = AutoConfig.from_pretrained(
-        model_args.model_name_or_path, cache_dir=model_args.cache_dir, use_auth_token=data_args.use_auth_token
+        model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        token=data_args.token,
+        trust_remote_code=data_args.trust_remote_code,
     )
 
     # 4. Next, if no tokenizer file is defined,
@@ -500,7 +514,11 @@ def main():
     vocab_dict = {}
     if tokenizer_name_or_path is not None:
         # load vocabulary of other adapter languages so that new language can be appended
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_auth_token=data_args.use_auth_token)
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name_or_path,
+            token=data_args.token,
+            trust_remote_code=data_args.trust_remote_code,
+        )
         vocab_dict = tokenizer.vocab.copy()
         if tokenizer.target_lang is None:
             raise ValueError("Make sure to load a multi-lingual tokenizer with a set target language.")
@@ -540,7 +558,7 @@ def main():
                 )
 
                 # if we doing adapter language training, save
-                # vocab with adpter language
+                # vocab with adapter language
                 if data_args.target_language is not None:
                     vocab_dict[data_args.target_language] = lang_dict
 
@@ -566,11 +584,15 @@ def main():
     # load feature_extractor and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name_or_path,
-        use_auth_token=data_args.use_auth_token,
+        token=data_args.token,
+        trust_remote_code=data_args.trust_remote_code,
         **tokenizer_kwargs,
     )
     feature_extractor = AutoFeatureExtractor.from_pretrained(
-        model_args.model_name_or_path, cache_dir=model_args.cache_dir, use_auth_token=data_args.use_auth_token
+        model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        token=data_args.token,
+        trust_remote_code=data_args.trust_remote_code,
     )
 
     # adapt config
@@ -595,7 +617,8 @@ def main():
         model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         config=config,
-        use_auth_token=data_args.use_auth_token,
+        token=data_args.token,
+        trust_remote_code=data_args.trust_remote_code,
         ignore_mismatched_sizes=True,
     )
 
@@ -665,7 +688,7 @@ def main():
     # instantiate a data collator and the trainer
 
     # Define evaluation metrics during training, *i.e.* word error rate, character error rate
-    eval_metrics = {metric: evaluate.load(metric) for metric in data_args.eval_metrics}
+    eval_metrics = {metric: evaluate.load(metric, cache_dir=model_args.cache_dir) for metric in data_args.eval_metrics}
 
     # for large datasets it is advised to run the preprocessing on a
     # single machine first with ``args.preprocessing_only`` since there will mostly likely
@@ -723,7 +746,7 @@ def main():
         compute_metrics=compute_metrics,
         train_dataset=vectorized_datasets["train"] if training_args.do_train else None,
         eval_dataset=vectorized_datasets["eval"] if training_args.do_eval else None,
-        tokenizer=processor,
+        processing_class=processor,
     )
 
     # 8. Finally, we can start training
@@ -781,7 +804,7 @@ def main():
     if "common_voice" in data_args.dataset_name:
         kwargs["language"] = config_name
 
-    # make sure that adapter weights are saved seperately
+    # make sure that adapter weights are saved separately
     adapter_file = WAV2VEC2_ADAPTER_SAFE_FILE.format(data_args.target_language)
     adapter_file = os.path.join(training_args.output_dir, adapter_file)
     logger.info(f"Saving adapter weights under {adapter_file}...")

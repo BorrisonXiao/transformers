@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright The HuggingFace Team and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -52,7 +51,7 @@ from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.31.0.dev0")
+check_min_version("4.53.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/translation/requirements.txt")
 
@@ -89,12 +88,22 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    use_auth_token: bool = field(
+    token: str = field(
+        default=None,
+        metadata={
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
+        },
+    )
+    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -156,7 +165,7 @@ class DataTrainingArguments:
         metadata={
             "help": (
                 "The maximum total sequence length for validation target text after tokenization. Sequences longer "
-                "than this will be truncated, sequences shorter will be padded. Will default to `max_target_length`."
+                "than this will be truncated, sequences shorter will be padded. Will default to `max_target_length`. "
                 "This argument is also used to override the ``max_length`` param of ``model.generate``, which is used "
                 "during ``evaluate`` and ``predict``."
             )
@@ -200,7 +209,7 @@ class DataTrainingArguments:
         },
     )
     num_beams: Optional[int] = field(
-        default=None,
+        default=1,
         metadata={
             "help": (
                 "Number of beams to use for evaluation. This argument will be passed to ``model.generate``, "
@@ -285,17 +294,17 @@ def main():
 
     # Log on each process the small summary:
     logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
     if data_args.source_prefix is None and model_args.model_name_or_path in [
-        "t5-small",
-        "t5-base",
-        "t5-large",
-        "t5-3b",
-        "t5-11b",
+        "google-t5/t5-small",
+        "google-t5/t5-base",
+        "google-t5/t5-large",
+        "google-t5/t5-3b",
+        "google-t5/t5-11b",
     ]:
         logger.warning(
             "You're running a t5 model but didn't provide a source prefix, which is expected, e.g. with "
@@ -335,7 +344,8 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
         )
     else:
         data_files = {}
@@ -348,14 +358,18 @@ def main():
         if data_args.test_file is not None:
             data_files["test"] = data_args.test_file
             extension = data_args.test_file.split(".")[-1]
+        if extension == "jsonl":
+            builder_name = "json"  # the "json" builder reads both .json and .jsonl files
+        else:
+            builder_name = extension  # e.g. "parquet"
         raw_datasets = load_dataset(
-            extension,
+            builder_name,
             data_files=data_files,
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
+    # https://huggingface.co/docs/datasets/loading.
 
     # Load pretrained model and tokenizer
     #
@@ -366,14 +380,16 @@ def main():
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         use_fast=model_args.use_fast_tokenizer,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
     model = AutoModelForSeq2SeqLM.from_pretrained(
         model_args.model_name_or_path,
@@ -381,7 +397,8 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -436,13 +453,26 @@ def main():
     source_lang = data_args.source_lang.split("_")[0]
     target_lang = data_args.target_lang.split("_")[0]
 
+    # Check the whether the source target length fits in the model, if it has absolute positional embeddings
+    if (
+        hasattr(model.config, "max_position_embeddings")
+        and not hasattr(model.config, "relative_attention_max_distance")
+        and model.config.max_position_embeddings < data_args.max_source_length
+    ):
+        raise ValueError(
+            f"`--max_source_length` is set to {data_args.max_source_length}, but the model only has"
+            f" {model.config.max_position_embeddings} position encodings. Consider either reducing"
+            f" `--max_source_length` to {model.config.max_position_embeddings} or using a model with larger position "
+            "embeddings"
+        )
+
     # Temporarily set max_target_length for training.
     max_target_length = data_args.max_target_length
     padding = "max_length" if data_args.pad_to_max_length else False
 
     if training_args.label_smoothing_factor > 0 and not hasattr(model, "prepare_decoder_input_ids_from_labels"):
         logger.warning(
-            "label_smoothing is enabled but the `prepare_decoder_input_ids_from_labels` method is not defined for"
+            "label_smoothing is enabled but the `prepare_decoder_input_ids_from_labels` method is not defined for "
             f"`{model.__class__.__name__}`. This will lead to loss being calculated twice and will take up more memory"
         )
 
@@ -531,7 +561,7 @@ def main():
         )
 
     # Metric
-    metric = evaluate.load("sacrebleu")
+    metric = evaluate.load("sacrebleu", cache_dir=model_args.cache_dir)
 
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
@@ -566,7 +596,7 @@ def main():
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics if training_args.predict_with_generate else None,
     )

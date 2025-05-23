@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2018 Google AI, Google Brain and Carnegie Mellon University Authors and the HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -14,17 +13,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Conditional text generation with the auto-regressive models of the library (GPT/GPT-2/CTRL/Transformer-XL/XLNet)
-"""
-
+"""Conditional text generation with the auto-regressive models of the library (GPT/GPT-2/CTRL/Transformer-XL/XLNet)"""
 
 import argparse
 import inspect
 import logging
-from typing import Tuple
 
-import numpy as np
 import torch
+from accelerate import PartialState
+from accelerate.utils import set_seed
 
 from transformers import (
     AutoTokenizer,
@@ -37,12 +34,9 @@ from transformers import (
     GPT2Tokenizer,
     GPTJForCausalLM,
     LlamaForCausalLM,
-    LlamaTokenizer,
     OpenAIGPTLMHeadModel,
     OpenAIGPTTokenizer,
     OPTForCausalLM,
-    TransfoXLLMHeadModel,
-    TransfoXLTokenizer,
     XLMTokenizer,
     XLMWithLMHeadModel,
     XLNetLMHeadModel,
@@ -65,11 +59,10 @@ MODEL_CLASSES = {
     "ctrl": (CTRLLMHeadModel, CTRLTokenizer),
     "openai-gpt": (OpenAIGPTLMHeadModel, OpenAIGPTTokenizer),
     "xlnet": (XLNetLMHeadModel, XLNetTokenizer),
-    "transfo-xl": (TransfoXLLMHeadModel, TransfoXLTokenizer),
     "xlm": (XLMWithLMHeadModel, XLMTokenizer),
     "gptj": (GPTJForCausalLM, AutoTokenizer),
     "bloom": (BloomForCausalLM, BloomTokenizerFast),
-    "llama": (LlamaForCausalLM, LlamaTokenizer),
+    "llama": (LlamaForCausalLM, AutoTokenizer),
     "opt": (OPTForCausalLM, GPT2Tokenizer),
 }
 
@@ -86,13 +79,6 @@ father initially slaps him for making such an accusation, Rasputin watches as th
 man is chased outside and beaten. Twenty years later, Rasputin sees a vision of
 the Virgin Mary, prompting him to become a priest. Rasputin quickly becomes famous,
 with people, even a bishop, begging for his blessing. <eod> </s> <eos>"""
-
-
-def set_seed(args):
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if args.n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
 
 
 #
@@ -279,8 +265,8 @@ class _ModelFallbackWrapper(GenerationMixin):
         )
 
     def _reorder_cache(
-        self, past_key_values: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor
-    ) -> Tuple[Tuple[torch.Tensor]]:
+        self, past_key_values: tuple[tuple[torch.Tensor]], beam_idx: torch.Tensor
+    ) -> tuple[tuple[torch.Tensor]]:
         """
         This function is used to re-order the `past_key_values` cache if [`~PretrainedModel.beam_search`] or
         [`~PretrainedModel.beam_sample`] is called. This is required to match `past_key_values` with the correct
@@ -327,7 +313,11 @@ def main():
     parser.add_argument("--xlm_language", type=str, default="", help="Optional language when used with the XLM model.")
 
     parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
-    parser.add_argument("--no_cuda", action="store_true", help="Avoid using CUDA when available")
+    parser.add_argument(
+        "--use_cpu",
+        action="store_true",
+        help="Whether or not to use cpu. If set to False, we will use gpu/npu or mps device if available",
+    )
     parser.add_argument("--num_return_sequences", type=int, default=1, help="The number of samples to generate.")
     parser.add_argument(
         "--fp16",
@@ -337,12 +327,13 @@ def main():
     parser.add_argument("--jit", action="store_true", help="Whether or not to use jit trace to accelerate inference")
     args = parser.parse_args()
 
-    args.device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-    args.n_gpu = 0 if args.no_cuda else torch.cuda.device_count()
+    # Initialize the distributed state.
+    distributed_state = PartialState(cpu=args.use_cpu)
 
-    logger.warning(f"device: {args.device}, n_gpu: {args.n_gpu}, 16-bits training: {args.fp16}")
+    logger.warning(f"device: {distributed_state.device}, 16-bits inference: {args.fp16}")
 
-    set_seed(args)
+    if args.seed is not None:
+        set_seed(args.seed)
 
     # Initialize the model and tokenizer
     try:
@@ -355,7 +346,9 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = model_class.from_pretrained(args.model_name_or_path)
-    model.to(args.device)
+
+    # Set the model to the right device
+    model.to(distributed_state.device)
 
     if args.fp16:
         model.half()
@@ -371,10 +364,7 @@ def main():
         prepare_input = PREPROCESSING_FUNCTIONS.get(args.model_type)
         preprocessed_prompt_text = prepare_input(args, model, tokenizer, prompt_text)
 
-        if model.__class__.__name__ in ["TransfoXLLMHeadModel"]:
-            tokenizer_kwargs = {"add_space_before_punct_symbol": True}
-        else:
-            tokenizer_kwargs = {}
+        tokenizer_kwargs = {}
 
         encoded_prompt = tokenizer.encode(
             preprocessed_prompt_text, add_special_tokens=False, return_tensors="pt", **tokenizer_kwargs
@@ -382,7 +372,7 @@ def main():
     else:
         prefix = args.prefix if args.prefix else args.padding_text
         encoded_prompt = tokenizer.encode(prefix + prompt_text, add_special_tokens=False, return_tensors="pt")
-    encoded_prompt = encoded_prompt.to(args.device)
+    encoded_prompt = encoded_prompt.to(distributed_state.device)
 
     if encoded_prompt.size()[-1] == 0:
         input_ids = None

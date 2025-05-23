@@ -23,7 +23,7 @@ from huggingface_hub import hf_hub_download
 from transformers import (
     CLIPTokenizer,
     CLIPTokenizerFast,
-    VideoMAEFeatureExtractor,
+    VideoMAEImageProcessor,
     XCLIPConfig,
     XCLIPModel,
     XCLIPProcessor,
@@ -279,7 +279,7 @@ def convert_xclip_checkpoint(model_name, pytorch_dump_folder_path=None, push_to_
     if "drive" in checkpoint_url:
         output = "pytorch_model.bin"
         gdown.cached_download(checkpoint_url, output, quiet=False)
-        state_dict = torch.load(output, map_location="cpu")["model"]
+        state_dict = torch.load(output, map_location="cpu", weights_only=True)["model"]
     else:
         state_dict = torch.hub.load_state_dict_from_url(checkpoint_url)["model"]
 
@@ -291,10 +291,10 @@ def convert_xclip_checkpoint(model_name, pytorch_dump_folder_path=None, push_to_
     model.eval()
 
     size = 336 if model_name == "xclip-large-patch14-16-frames" else 224
-    feature_extractor = VideoMAEFeatureExtractor(size=size)
+    image_processor = VideoMAEImageProcessor(size=size)
     slow_tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
     fast_tokenizer = CLIPTokenizerFast.from_pretrained("openai/clip-vit-base-patch32")
-    processor = XCLIPProcessor(feature_extractor=feature_extractor, tokenizer=fast_tokenizer)
+    processor = XCLIPProcessor(image_processor=image_processor, tokenizer=fast_tokenizer)
 
     video = prepare_video(num_frames)
     inputs = processor(

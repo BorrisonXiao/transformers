@@ -14,7 +14,6 @@
 # limitations under the License.
 """Convert MobileViTV2 checkpoints from the ml-cvnets library."""
 
-
 import argparse
 import collections
 import json
@@ -100,9 +99,9 @@ def get_mobilevitv2_config(task_name, orig_cfg_file):
     orig_config = load_orig_config_file(orig_cfg_file)
     assert getattr(orig_config, "model.classification.name", -1) == "mobilevit_v2", "Invalid model"
     config.width_multiplier = getattr(orig_config, "model.classification.mitv2.width_multiplier", 1.0)
-    assert (
-        getattr(orig_config, "model.classification.mitv2.attn_norm_layer", -1) == "layer_norm_2d"
-    ), "Norm layers other than layer_norm_2d is not supported"
+    assert getattr(orig_config, "model.classification.mitv2.attn_norm_layer", -1) == "layer_norm_2d", (
+        "Norm layers other than layer_norm_2d is not supported"
+    )
     config.hidden_act = getattr(orig_config, "model.classification.activation.name", "swish")
     # config.image_size == getattr(orig_config,  'sampler.bs.crop_size_width', 256)
 
@@ -152,7 +151,7 @@ def create_rename_keys(state_dict, base_model=False):
             k_new = k_new.replace("conv_1.", f"{model_prefix}conv_stem.")
         for i in [1, 2]:
             if f"layer_{i}." in k:
-                k_new = k_new.replace(f"layer_{i}.", f"{model_prefix}encoder.layer.{i-1}.layer.")
+                k_new = k_new.replace(f"layer_{i}.", f"{model_prefix}encoder.layer.{i - 1}.layer.")
         if ".exp_1x1." in k:
             k_new = k_new.replace(".exp_1x1.", ".expand_1x1.")
         if ".red_1x1." in k:
@@ -160,11 +159,11 @@ def create_rename_keys(state_dict, base_model=False):
 
         for i in [3, 4, 5]:
             if f"layer_{i}.0." in k:
-                k_new = k_new.replace(f"layer_{i}.0.", f"{model_prefix}encoder.layer.{i-1}.downsampling_layer.")
+                k_new = k_new.replace(f"layer_{i}.0.", f"{model_prefix}encoder.layer.{i - 1}.downsampling_layer.")
             if f"layer_{i}.1.local_rep.0." in k:
-                k_new = k_new.replace(f"layer_{i}.1.local_rep.0.", f"{model_prefix}encoder.layer.{i-1}.conv_kxk.")
+                k_new = k_new.replace(f"layer_{i}.1.local_rep.0.", f"{model_prefix}encoder.layer.{i - 1}.conv_kxk.")
             if f"layer_{i}.1.local_rep.1." in k:
-                k_new = k_new.replace(f"layer_{i}.1.local_rep.1.", f"{model_prefix}encoder.layer.{i-1}.conv_1x1.")
+                k_new = k_new.replace(f"layer_{i}.1.local_rep.1.", f"{model_prefix}encoder.layer.{i - 1}.conv_1x1.")
 
         for i in [3, 4, 5]:
             if i == 3:
@@ -177,15 +176,17 @@ def create_rename_keys(state_dict, base_model=False):
             for j in j_in:
                 if f"layer_{i}.1.global_rep.{j}." in k:
                     k_new = k_new.replace(
-                        f"layer_{i}.1.global_rep.{j}.", f"{model_prefix}encoder.layer.{i-1}.transformer.layer.{j}."
+                        f"layer_{i}.1.global_rep.{j}.", f"{model_prefix}encoder.layer.{i - 1}.transformer.layer.{j}."
                     )
-            if f"layer_{i}.1.global_rep.{j+1}." in k:
+            if f"layer_{i}.1.global_rep.{j + 1}." in k:
                 k_new = k_new.replace(
-                    f"layer_{i}.1.global_rep.{j+1}.", f"{model_prefix}encoder.layer.{i-1}.layernorm."
+                    f"layer_{i}.1.global_rep.{j + 1}.", f"{model_prefix}encoder.layer.{i - 1}.layernorm."
                 )
 
             if f"layer_{i}.1.conv_proj." in k:
-                k_new = k_new.replace(f"layer_{i}.1.conv_proj.", f"{model_prefix}encoder.layer.{i-1}.conv_projection.")
+                k_new = k_new.replace(
+                    f"layer_{i}.1.conv_proj.", f"{model_prefix}encoder.layer.{i - 1}.conv_projection."
+                )
 
         if "pre_norm_attn.0." in k:
             k_new = k_new.replace("pre_norm_attn.0.", "layernorm_before.")
@@ -238,7 +239,7 @@ def convert_mobilevitv2_checkpoint(task_name, checkpoint_path, orig_config_path,
     config = get_mobilevitv2_config(task_name, orig_config_path)
 
     # load original state_dict
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
     # load huggingface model
     if task_name.startswith("ade20k_") or task_name.startswith("voc_"):
@@ -259,8 +260,8 @@ def convert_mobilevitv2_checkpoint(task_name, checkpoint_path, orig_config_path,
     model.load_state_dict(state_dict)
 
     # Check outputs on an image, prepared by MobileViTImageProcessor
-    feature_extractor = MobileViTImageProcessor(crop_size=config.image_size, size=config.image_size + 32)
-    encoding = feature_extractor(images=prepare_img(), return_tensors="pt")
+    image_processor = MobileViTImageProcessor(crop_size=config.image_size, size=config.image_size + 32)
+    encoding = image_processor(images=prepare_img(), return_tensors="pt")
     outputs = model(**encoding)
 
     # verify classification model
@@ -276,8 +277,8 @@ def convert_mobilevitv2_checkpoint(task_name, checkpoint_path, orig_config_path,
     Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
     print(f"Saving model {task_name} to {pytorch_dump_folder_path}")
     model.save_pretrained(pytorch_dump_folder_path)
-    print(f"Saving feature extractor to {pytorch_dump_folder_path}")
-    feature_extractor.save_pretrained(pytorch_dump_folder_path)
+    print(f"Saving image processor to {pytorch_dump_folder_path}")
+    image_processor.save_pretrained(pytorch_dump_folder_path)
 
 
 if __name__ == "__main__":
@@ -315,7 +316,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--orig_checkpoint_path", required=True, type=str, help="Path to the original state dict (.pt file)."
     )
-    parser.add_argument("--orig_config_path", required=True, type=str, help="Path to the original config file.")
+    parser.add_argument(
+        "--orig_config_path",
+        required=True,
+        type=str,
+        help="Path to the original config file. yaml.load will be used to load the file, please be wary of which file you're loading.",
+    )
     parser.add_argument(
         "--pytorch_dump_folder_path", required=True, type=str, help="Path to the output PyTorch model directory."
     )

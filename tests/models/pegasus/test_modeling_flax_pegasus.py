@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -52,7 +51,7 @@ class FlaxPegasusModelTester:
         use_labels=False,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_dropout_prob=0.1,
@@ -145,7 +144,7 @@ class FlaxPegasusModelTester:
 
         outputs = model.decode(decoder_input_ids, encoder_outputs)
 
-        diff = np.max(np.abs((outputs_cache_next[0][:, -1, :5] - outputs[0][:, -1, :5])))
+        diff = np.max(np.abs(outputs_cache_next[0][:, -1, :5] - outputs[0][:, -1, :5]))
         self.parent.assertTrue(diff < 1e-3, msg=f"Max diff is {diff}")
 
     def check_use_cache_forward_with_attn_mask(self, model_class_name, config, inputs_dict):
@@ -191,7 +190,7 @@ class FlaxPegasusModelTester:
 
         outputs = model.decode(decoder_input_ids, encoder_outputs, decoder_attention_mask=decoder_attention_mask)
 
-        diff = np.max(np.abs((outputs_cache_next[0][:, -1, :5] - outputs[0][:, -1, :5])))
+        diff = np.max(np.abs(outputs_cache_next[0][:, -1, :5] - outputs[0][:, -1, :5]))
         self.parent.assertTrue(diff < 1e-3, msg=f"Max diff is {diff}")
 
 
@@ -230,7 +229,6 @@ class FlaxPegasusModelTest(FlaxModelTesterMixin, unittest.TestCase):
         if is_flax_available()
         else ()
     )
-    all_generative_model_classes = (FlaxPegasusForConditionalGeneration,) if is_flax_available() else ()
     is_encoder_decoder = True
     test_pruning = False
     test_head_masking = False

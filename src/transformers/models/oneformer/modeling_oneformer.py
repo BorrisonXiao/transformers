@@ -12,44 +12,39 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch OneFormer model."""
+"""PyTorch OneFormer model."""
+
 import copy
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.cuda.amp import autocast
 
-from ... import AutoBackbone
 from ...activations import ACT2FN
 from ...modeling_outputs import BaseModelOutput
 from ...modeling_utils import PreTrainedModel
 from ...utils import (
     ModelOutput,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
+    auto_docstring,
+    is_accelerate_available,
     is_scipy_available,
     logging,
-    replace_return_docstrings,
     requires_backends,
 )
+from ...utils.backbone_utils import load_backbone
 from .configuration_oneformer import OneFormerConfig
 
 
+if is_accelerate_available():
+    from accelerate import PartialState
+    from accelerate.utils import reduce
+
 logger = logging.get_logger(__name__)
-
-
-_CONFIG_FOR_DOC = "OneFormerConfig"
-_CHECKPOINT_FOR_DOC = "shi-labs/oneformer_ade20k_swin_tiny"
-
-ONEFORMER_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "shi-labs/oneformer_ade20k_swin_tiny",
-    # See all OneFormer models at https://huggingface.co/models?filter=oneformer
-]
 
 
 if is_scipy_available():
@@ -60,13 +55,15 @@ def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-# Copied from transformers.models.deformable_detr.modeling_deformable_detr.multi_scale_deformable_attention
 def multi_scale_deformable_attention(
-    value: Tensor, value_spatial_shapes: Tensor, sampling_locations: Tensor, attention_weights: Tensor
+    value: Tensor,
+    value_spatial_shapes: Union[Tensor, List[Tuple]],
+    sampling_locations: Tensor,
+    attention_weights: Tensor,
 ) -> Tensor:
     batch_size, _, num_heads, hidden_dim = value.shape
     _, num_queries, num_heads, num_levels, num_points, _ = sampling_locations.shape
-    value_list = value.split([height.item() * width.item() for height, width in value_spatial_shapes], dim=1)
+    value_list = value.split([height * width for height, width in value_spatial_shapes], dim=1)
     sampling_grids = 2 * sampling_locations - 1
     sampling_value_list = []
     for level_id, (height, width) in enumerate(value_spatial_shapes):
@@ -167,7 +164,7 @@ def pair_wise_dice_loss(inputs: Tensor, labels: Tensor) -> Tensor:
         `torch.Tensor`: The computed loss between each pairs.
     """
     inputs = inputs.sigmoid().flatten(1)
-    numerator = 2 * torch.einsum("nc,mc->nm", inputs, labels)
+    numerator = 2 * torch.matmul(inputs, labels.T)
     # using broadcasting to get a [num_queries, NUM_CLASSES] matrix
     denominator = inputs.sum(-1)[:, None] + labels.sum(-1)[None, :]
     loss = 1 - (numerator + 1) / (denominator + 1)
@@ -196,10 +193,9 @@ def pair_wise_sigmoid_cross_entropy_loss(inputs: torch.Tensor, labels: torch.Ten
     cross_entropy_loss_pos = criterion(inputs, torch.ones_like(inputs))
     cross_entropy_loss_neg = criterion(inputs, torch.zeros_like(inputs))
 
-    loss = torch.einsum("nc,mc->nm", cross_entropy_loss_pos, labels) + torch.einsum(
-        "nc,mc->nm", cross_entropy_loss_neg, (1 - labels)
-    )
-    loss = loss / height_and_width
+    loss_pos = torch.matmul(cross_entropy_loss_pos / height_and_width, labels.T)
+    loss_neg = torch.matmul(cross_entropy_loss_neg / height_and_width, (1 - labels).T)
+    loss = loss_pos + loss_neg
     return loss
 
 
@@ -259,7 +255,7 @@ class OneFormerHungarianMatcher(nn.Module):
         """
         super().__init__()
         if cost_class == 0 and cost_mask == 0 and cost_dice == 0:
-            raise ValueError("All costs cant be 0")
+            raise ValueError("All costs can't be 0")
         self.cost_class = cost_class
         self.cost_mask = cost_mask
         self.cost_dice = cost_dice
@@ -302,7 +298,7 @@ class OneFormerHungarianMatcher(nn.Module):
             pred_probs = pred_probs.softmax(-1)
             # Compute the classification cost. Contrary to the loss, we don't use the NLL,
             # but approximate it in 1 - proba[target class].
-            # The 1 is a constant that doesn't change the matching, it can be ommitted.
+            # The 1 is a constant that doesn't change the matching, it can be omitted.
             cost_class = -pred_probs[:, labels]
 
             pred_mask = pred_mask[:, None]
@@ -356,7 +352,7 @@ class OneFormerLoss(nn.Module):
         num_points: int,
         oversample_ratio: float,
         importance_sample_ratio: float,
-        contrastive_temperature: float = None,
+        contrastive_temperature: Optional[float] = None,
     ):
         """
         This class computes the losses using the class predictions, mask predictions and the contrastive queries.
@@ -369,7 +365,7 @@ class OneFormerLoss(nn.Module):
             num_labels (`int`):
                 The number of classes.
             matcher (`OneFormerHungarianMatcher`):
-                A torch module that computes the assigments between the predictions and labels.
+                A torch module that computes the assignments between the predictions and labels.
             weight_dict (`Dict[str, float]`):
                 A dictionary of weights to be applied to the different losses.
             eos_coef (`float`):
@@ -399,7 +395,7 @@ class OneFormerLoss(nn.Module):
         self.importance_sample_ratio = importance_sample_ratio
         self.contrastive_temperature = contrastive_temperature
         if self.contrastive_temperature is not None:
-            self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / contrastive_temperature))
+            self.logit_scale = nn.Parameter(torch.tensor(np.log(1 / contrastive_temperature)))
 
     def _max_by_axis(self, the_list: List[List[int]]) -> List[int]:
         maxes = the_list[0]
@@ -682,7 +678,7 @@ class OneFormerLoss(nn.Module):
             - **loss_dice** -- The loss computed using dice loss on the predicted on the predicted and ground truth
               masks.
             - **loss_contrastive** -- The query-text contrstive loss computed using object and text queries.
-            if `use_auxiliary_loss` was set to `true` in [`OneFormerConfig`], the dictionary contains addional losses
+            if `use_auxiliary_loss` was set to `true` in [`OneFormerConfig`], the dictionary contains additional losses
             for each auxiliary predictions.
         """
 
@@ -722,8 +718,15 @@ class OneFormerLoss(nn.Module):
         Computes the average number of target masks across the batch, for normalization purposes.
         """
         num_masks = sum([len(classes) for classes in class_labels])
-        num_masks_pt = torch.as_tensor([num_masks], dtype=torch.float, device=device)
-        return num_masks_pt
+        num_masks = torch.as_tensor([num_masks], dtype=torch.float, device=device)
+        world_size = 1
+        if is_accelerate_available():
+            if PartialState._shared_state != {}:
+                num_masks = reduce(num_masks)
+                world_size = PartialState().num_processes
+
+        num_masks = torch.clamp(num_masks / world_size, min=1)
+        return num_masks
 
 
 @dataclass
@@ -745,10 +748,10 @@ class OneFormerTransformerDecoderOutput(BaseModelOutput):
             Tuple of class and mask predictions from each layer of the transformer decoder.
     """
 
-    object_queries: torch.FloatTensor = None
+    object_queries: Optional[torch.FloatTensor] = None
     contrastive_logits: Optional[torch.FloatTensor] = None
-    prediction_masks: torch.FloatTensor = None
-    prediction_class: torch.FloatTensor = None
+    prediction_masks: Optional[torch.FloatTensor] = None
+    prediction_class: Optional[torch.FloatTensor] = None
     auxiliary_predictions: Optional[Tuple[Dict[str, torch.FloatTensor]]] = None
 
 
@@ -773,7 +776,7 @@ class OneFormerPixelDecoderOutput(ModelOutput):
     """
 
     multi_scale_features: Tuple[torch.FloatTensor] = None
-    mask_features: torch.FloatTensor = None
+    mask_features: Optional[torch.FloatTensor] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
@@ -797,7 +800,7 @@ class OneFormerPixelLevelModuleOutput(ModelOutput):
 
     encoder_features: List[torch.FloatTensor] = None
     decoder_features: List[torch.FloatTensor] = None
-    decoder_last_feature: torch.FloatTensor = None
+    decoder_last_feature: Optional[torch.FloatTensor] = None
 
 
 @dataclass
@@ -840,13 +843,13 @@ class OneFormerModelOutput(ModelOutput):
     encoder_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     pixel_decoder_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     transformer_decoder_hidden_states: Optional[torch.FloatTensor] = None
-    transformer_decoder_object_queries: torch.FloatTensor = None
+    transformer_decoder_object_queries: Optional[torch.FloatTensor] = None
     transformer_decoder_contrastive_queries: Optional[torch.FloatTensor] = None
-    transformer_decoder_mask_predictions: torch.FloatTensor = None
-    transformer_decoder_class_predictions: torch.FloatTensor = None
+    transformer_decoder_mask_predictions: Optional[torch.FloatTensor] = None
+    transformer_decoder_class_predictions: Optional[torch.FloatTensor] = None
     transformer_decoder_auxiliary_predictions: Optional[Tuple[Dict[str, torch.FloatTensor]]] = None
     text_queries: Optional[torch.FloatTensor] = None
-    task_token: torch.FloatTensor = None
+    task_token: Optional[torch.FloatTensor] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
@@ -903,19 +906,19 @@ class OneFormerForUniversalSegmentationOutput(ModelOutput):
     """
 
     loss: Optional[torch.FloatTensor] = None
-    class_queries_logits: torch.FloatTensor = None
-    masks_queries_logits: torch.FloatTensor = None
+    class_queries_logits: Optional[torch.FloatTensor] = None
+    masks_queries_logits: Optional[torch.FloatTensor] = None
     auxiliary_predictions: List[Dict[str, torch.FloatTensor]] = None
     encoder_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     pixel_decoder_hidden_states: Optional[List[torch.FloatTensor]] = None
     transformer_decoder_hidden_states: Optional[torch.FloatTensor] = None
-    transformer_decoder_object_queries: torch.FloatTensor = None
+    transformer_decoder_object_queries: Optional[torch.FloatTensor] = None
     transformer_decoder_contrastive_queries: Optional[torch.FloatTensor] = None
-    transformer_decoder_mask_predictions: torch.FloatTensor = None
-    transformer_decoder_class_predictions: torch.FloatTensor = None
+    transformer_decoder_mask_predictions: Optional[torch.FloatTensor] = None
+    transformer_decoder_class_predictions: Optional[torch.FloatTensor] = None
     transformer_decoder_auxiliary_predictions: Optional[List[Dict[str, torch.FloatTensor]]] = None
     text_queries: Optional[torch.FloatTensor] = None
-    task_token: torch.FloatTensor = None
+    task_token: Optional[torch.FloatTensor] = None
     attentions: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
 
 
@@ -1076,7 +1079,7 @@ class OneFormerPixelDecoderEncoderLayer(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        position_embeddings: torch.Tensor = None,
+        position_embeddings: Optional[torch.Tensor] = None,
         reference_points=None,
         spatial_shapes=None,
         level_start_index=None,
@@ -1179,8 +1182,8 @@ class OneFormerPixelDecoderEncoderOnly(nn.Module):
         reference_points_list = []
         for lvl, (height, width) in enumerate(spatial_shapes):
             ref_y, ref_x = torch.meshgrid(
-                torch.linspace(0.5, height - 0.5, height, dtype=torch.float32, device=device),
-                torch.linspace(0.5, width - 0.5, width, dtype=torch.float32, device=device),
+                torch.linspace(0.5, height - 0.5, height, dtype=valid_ratios.dtype, device=device),
+                torch.linspace(0.5, width - 0.5, width, dtype=valid_ratios.dtype, device=device),
             )
             ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * height)
             ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * width)
@@ -1352,15 +1355,15 @@ class OneFormerPixelDecoder(nn.Module):
         self.lateral_convs = lateral_convs[::-1]
         self.output_convs = output_convs[::-1]
 
-    def get_valid_ratio(self, mask):
+    def get_valid_ratio(self, mask, dtype=torch.float32):
         """Get the valid ratio of all feature maps."""
 
         _, height, width = mask.shape
         valid_height = torch.sum(~mask[:, :, 0], 1)
         valid_width = torch.sum(~mask[:, 0, :], 1)
-        valid_ratio_heigth = valid_height.float() / height
-        valid_ratio_width = valid_width.float() / width
-        valid_ratio = torch.stack([valid_ratio_width, valid_ratio_heigth], -1)
+        valid_ratio_height = valid_height.to(dtype) / height
+        valid_ratio_width = valid_width.to(dtype) / width
+        valid_ratio = torch.stack([valid_ratio_width, valid_ratio_height], -1)
         return valid_ratio
 
     def forward(
@@ -1380,9 +1383,8 @@ class OneFormerPixelDecoder(nn.Module):
         sources = []
         position_embeddings_list = []
         for level, source in enumerate(features[::-1][: self.num_feature_levels]):
-            feats = source.float()
-            sources.append(self.input_projections[level](feats))
-            position_embeddings_list.append(self.position_embedding(feats))
+            sources.append(self.input_projections[level](source))
+            position_embeddings_list.append(self.position_embedding(source))
 
         masks = [torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool) for x in sources]
 
@@ -1407,8 +1409,7 @@ class OneFormerPixelDecoder(nn.Module):
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=source_flatten.device)
         level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
-        valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
-        valid_ratios = valid_ratios.float()
+        valid_ratios = torch.stack([self.get_valid_ratio(m, dtype=source_flatten.dtype) for m in masks], 1)
 
         # Fourth, sent source_flatten + mask_flatten + lvl_pos_embed_flatten (backbone + proj layer output) through encoder
         # Also provide spatial_shapes, level_start_index and valid_ratios
@@ -1445,7 +1446,6 @@ class OneFormerPixelDecoder(nn.Module):
         # append `out` with extra FPN levels
         # Reverse feature maps into top-down order (from low to high resolution)
         for idx, feats in enumerate(features[: self.num_fpn_levels][::-1]):
-            feats = feats.float()
             lateral_conv = self.lateral_convs[idx]
             output_conv = self.output_convs[idx]
             cur_fpn = lateral_conv(feats)
@@ -1481,8 +1481,7 @@ class OneFormerPixelLevelModule(nn.Module):
                 The configuration used to instantiate this model.
         """
         super().__init__()
-        backbone_config = config.backbone_config
-        self.encoder = AutoBackbone.from_config(backbone_config)
+        self.encoder = load_backbone(config)
         self.decoder = OneFormerPixelDecoder(config, feature_channels=self.encoder.channels)
 
     def forward(self, pixel_values: Tensor, output_hidden_states: bool = False) -> OneFormerPixelLevelModuleOutput:
@@ -2396,15 +2395,15 @@ class OneFormerSinePositionEmbedding(nn.Module):
     def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         if mask is None:
             mask = torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool)
-        not_mask = ~mask
-        y_embed = not_mask.cumsum(1, dtype=torch.float32)
-        x_embed = not_mask.cumsum(2, dtype=torch.float32)
+        not_mask = (~mask).to(x.dtype)
+        y_embed = not_mask.cumsum(1)
+        x_embed = not_mask.cumsum(2)
         if self.normalize:
             eps = 1e-6
             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
-        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.int64, device=x.device).type_as(x)
         dim_t = self.temperature ** (2 * torch.div(dim_t, 2, rounding_mode="floor") / self.num_pos_feats)
 
         pos_x = x_embed[:, :, :, None] / dim_t
@@ -2604,7 +2603,7 @@ class OneFormerTextTransformer(nn.Module):
         width: int,
         layers: int,
         heads: int,
-        attn_mask: torch.Tensor = None,
+        attn_mask: Optional[torch.Tensor] = None,
         use_checkpoint=False,
         layer_norm_eps=1e-05,
     ):
@@ -2619,7 +2618,7 @@ class OneFormerTextTransformer(nn.Module):
     def forward(self, hidden_states: torch.Tensor):
         for layer in self.layers:
             if self.use_checkpoint:
-                hidden_states = torch.utils.checkpoint.checkpoint(layer, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(layer, hidden_states)
             else:
                 hidden_states = layer(hidden_states)
         return hidden_states
@@ -2744,45 +2743,11 @@ class OneFormerTaskModel(nn.Module):
         )
 
     def forward(self, inputs: Tensor) -> Tensor:
-        task_tokens = self.task_mlp(inputs.float())
+        task_tokens = self.task_mlp(inputs)
         return task_tokens
 
 
-ONEFORMER_START_DOCSTRING = r"""
-    This model is a PyTorch [nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) sub-class. Use it as a
-    regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage and behavior.
-
-    Parameters:
-        config ([`OneFormerConfig`]): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
-"""
-
-ONEFORMER_INPUTS_DOCSTRING = r"""
-    Args:
-        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`OneFormerProcessor`]. See
-            [`OneFormerProcessor.__call__`] for details.
-        task_inputs (`torch.FloatTensor` of shape `(batch_size, sequence_length)`):
-            Task inputs. Task inputs can be obtained using [`AutoImageProcessor`]. See [`OneFormerProcessor.__call__`]
-            for details.
-        pixel_mask (`torch.LongTensor` of shape `(batch_size, height, width)`, *optional*):
-            Mask to avoid performing attention on padding pixel values. Mask values selected in `[0, 1]`:
-
-            - 1 for pixels that are real (i.e. **not masked**),
-            - 0 for pixels that are padding (i.e. **masked**).
-
-            [What are attention masks?](../glossary#attention-mask)
-        output_hidden_states (`bool`, *optional*):
-            Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
-            more detail.
-        output_attentions (`bool`, *optional*):
-            Whether or not to return the attentions tensors of Detr's decoder attention layers.
-        return_dict (`bool`, *optional*):
-            Whether or not to return a [`~OneFormerModelOutput`] instead of a plain tuple.
-"""
-
-
+@auto_docstring
 class OneFormerPreTrainedModel(PreTrainedModel):
     config_class = OneFormerConfig
     base_model_prefix = "model"
@@ -2803,7 +2768,7 @@ class OneFormerPreTrainedModel(PreTrainedModel):
             module.query_input_projection._is_hf_initialized = True
         elif isinstance(module, OneFormerPixelDecoderEncoderMultiscaleDeformableAttention):
             nn.init.constant_(module.sampling_offsets.weight.data, 0.0)
-            thetas = torch.arange(module.n_heads, dtype=torch.float32) * (2.0 * math.pi / module.n_heads)
+            thetas = torch.arange(module.n_heads, dtype=torch.int64).float() * (2.0 * math.pi / module.n_heads)
             grid_init = torch.stack([thetas.cos(), thetas.sin()], -1)
             grid_init = (
                 (grid_init / grid_init.abs().max(-1, keepdim=True)[0])
@@ -2898,10 +2863,7 @@ class OneFormerPreTrainedModel(PreTrainedModel):
                 module.weight.data[module.padding_idx].zero_()
 
 
-@add_start_docstrings(
-    "The bare OneFormer Model outputting raw hidden-states without any specific head on top.",
-    ONEFORMER_START_DOCSTRING,
-)
+@auto_docstring
 class OneFormerModel(OneFormerPreTrainedModel):
     main_input_name = ["pixel_values", "task_inputs"]
 
@@ -2919,8 +2881,7 @@ class OneFormerModel(OneFormerPreTrainedModel):
 
         self.post_init()
 
-    @add_start_docstrings_to_model_forward(ONEFORMER_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=OneFormerModelOutput, config_class=_CONFIG_FOR_DOC)
+    @auto_docstring
     def forward(
         self,
         pixel_values: Tensor,
@@ -2932,8 +2893,12 @@ class OneFormerModel(OneFormerPreTrainedModel):
         return_dict: Optional[bool] = None,
     ) -> OneFormerModelOutput:
         r"""
-        Returns:
-            `OneFormerModelOutput`
+        task_inputs (`torch.FloatTensor` of shape `(batch_size, sequence_length)`):
+            Task inputs. Task inputs can be obtained using [`AutoImageProcessor`]. See [`OneFormerProcessor.__call__`]
+            for details.
+        text_inputs (`List[torch.Tensor]`, *optional*):
+            Tensor fof shape `(num_queries, sequence_length)` to be fed to a model
+
         Example:
 
         ```python
@@ -2980,7 +2945,7 @@ class OneFormerModel(OneFormerPreTrainedModel):
         multi_scale_features = pixel_level_module_output.decoder_features
         mask_features = pixel_level_module_output.decoder_last_feature
 
-        task_token = self.task_encoder(task_inputs)
+        task_token = self.task_encoder(task_inputs.to(self.dtype))
 
         if self.is_training:
             text_queries = self.text_mapper(text_inputs)
@@ -3027,9 +2992,10 @@ class OneFormerModel(OneFormerPreTrainedModel):
         return output
 
 
-@add_start_docstrings(
-    "OneFormer Model for instance, semantic and panoptic image segmentation.",
-    ONEFORMER_START_DOCSTRING,
+@auto_docstring(
+    custom_intro="""
+    OneFormer Model for instance, semantic and panoptic image segmentation.
+    """
 )
 class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
     main_input_name = ["pixel_values", "task_inputs"]
@@ -3098,8 +3064,7 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
     def get_loss(self, loss_dict: Dict[str, Tensor]) -> Tensor:
         return sum(loss_dict.values())
 
-    @add_start_docstrings_to_model_forward(ONEFORMER_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=OneFormerForUniversalSegmentationOutput, config_class=_CONFIG_FOR_DOC)
+    @auto_docstring
     def forward(
         self,
         pixel_values: Tensor,
@@ -3114,6 +3079,9 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
         return_dict: Optional[bool] = None,
     ) -> OneFormerForUniversalSegmentationOutput:
         r"""
+        task_inputs (`torch.FloatTensor` of shape `(batch_size, sequence_length)`):
+            Task inputs. Task inputs can be obtained using [`AutoImageProcessor`]. See [`OneFormerProcessor.__call__`]
+            for details.
         text_inputs (`List[torch.Tensor]`, *optional*):
             Tensor fof shape `(num_queries, sequence_length)` to be fed to a model
         mask_labels (`List[torch.Tensor]`, *optional*):
@@ -3121,9 +3089,9 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
         class_labels (`List[torch.LongTensor]`, *optional*):
             list of target class labels of shape `(num_labels, height, width)` to be fed to a model. They identify the
             labels of `mask_labels`, e.g. the label of `mask_labels[i][j]` if `class_labels[i][j]`.
+        output_auxiliary_logits (`bool`, *optional*):
+            Whether or not to output auxiliary logits.
 
-        Returns:
-            `OneFormerUniversalSegmentationOutput`
         Example:
 
         Universal segmentation example:
@@ -3155,7 +3123,7 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
 
         >>> # you can pass them to processor for semantic postprocessing
         >>> predicted_semantic_map = processor.post_process_semantic_segmentation(
-        ...     outputs, target_sizes=[image.size[::-1]]
+        ...     outputs, target_sizes=[(image.height, image.width)]
         ... )[0]
         >>> f"👉 Semantic Predictions Shape: {list(predicted_semantic_map.shape)}"
         '👉 Semantic Predictions Shape: [512, 683]'
@@ -3172,7 +3140,7 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
 
         >>> # you can pass them to processor for instance postprocessing
         >>> predicted_instance_map = processor.post_process_instance_segmentation(
-        ...     outputs, target_sizes=[image.size[::-1]]
+        ...     outputs, target_sizes=[(image.height, image.width)]
         ... )[0]["segmentation"]
         >>> f"👉 Instance Predictions Shape: {list(predicted_instance_map.shape)}"
         '👉 Instance Predictions Shape: [512, 683]'
@@ -3189,7 +3157,7 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
 
         >>> # you can pass them to processor for panoptic postprocessing
         >>> predicted_panoptic_map = processor.post_process_panoptic_segmentation(
-        ...     outputs, target_sizes=[image.size[::-1]]
+        ...     outputs, target_sizes=[(image.height, image.width)]
         ... )[0]["segmentation"]
         >>> f"👉 Panoptic Predictions Shape: {list(predicted_panoptic_map.shape)}"
         '👉 Panoptic Predictions Shape: [512, 683]'
@@ -3250,5 +3218,8 @@ class OneFormerForUniversalSegmentation(OneFormerPreTrainedModel):
         if not return_dict:
             output = tuple(v for v in output.values())
             if loss is not None:
-                output = ((loss)) + output
+                output = (loss) + output
         return output
+
+
+__all__ = ["OneFormerForUniversalSegmentation", "OneFormerModel", "OneFormerPreTrainedModel"]

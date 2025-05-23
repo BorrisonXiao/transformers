@@ -30,7 +30,7 @@ transformers.logging.set_verbosity_info()
 ```
 
 You can also use the environment variable `TRANSFORMERS_VERBOSITY` to override the default verbosity. You can set it
-to one of the following: `debug`, `info`, `warning`, `error`, `critical`. For example:
+to one of the following: `debug`, `info`, `warning`, `error`, `critical`, `fatal`. For example:
 
 ```bash
 TRANSFORMERS_VERBOSITY=error ./myprogram.py
@@ -65,11 +65,28 @@ verbose to the most verbose), those levels (with their corresponding int values 
   critical errors.
 - `transformers.logging.ERROR` (int value, 40): only report errors.
 - `transformers.logging.WARNING` or `transformers.logging.WARN` (int value, 30): only reports error and
-  warnings. This the default level used by the library.
+  warnings. This is the default level used by the library.
 - `transformers.logging.INFO` (int value, 20): reports error, warnings and basic information.
 - `transformers.logging.DEBUG` (int value, 10): report all information.
 
 By default, `tqdm` progress bars will be displayed during model download. [`logging.disable_progress_bar`] and [`logging.enable_progress_bar`] can be used to suppress or unsuppress this behavior.
+
+## `logging` vs `warnings`
+
+Python has two logging systems that are often used in conjunction: `logging`, which is explained above, and `warnings`,
+which allows further classification of warnings in specific buckets, e.g., `FutureWarning` for a feature or path
+that has already been deprecated and `DeprecationWarning` to indicate an upcoming deprecation.
+
+We use both in the `transformers` library. We leverage and adapt `logging`'s `captureWarnings` method to allow
+management of these warning messages by the verbosity setters above.
+
+What does that mean for developers of the library? We should respect the following heuristics:
+- `warnings` should be favored for developers of the library and libraries dependent on `transformers`
+- `logging` should be used for end-users of the library using it in every-day projects
+
+See reference of the `captureWarnings` method below.
+
+[[autodoc]] logging.captureWarnings
 
 ## Base setters
 

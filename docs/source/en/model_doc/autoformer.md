@@ -16,6 +16,10 @@ rendered properly in your Markdown viewer.
 
 # Autoformer
 
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
+
 ## Overview
 
 The Autoformer model was proposed in [Autoformer: Decomposition Transformers with Auto-Correlation for Long-Term Series Forecasting](https://arxiv.org/abs/2106.13008) by Haixu Wu, Jiehui Xu, Jianmin Wang, Mingsheng Long.
@@ -29,16 +33,20 @@ The abstract from the paper is the following:
 This model was contributed by [elisim](https://huggingface.co/elisim) and [kashif](https://huggingface.co/kashif).
 The original code can be found [here](https://github.com/thuml/Autoformer).
 
+## Resources
+
+A list of official Hugging Face and community (indicated by 🌎) resources to help you get started. If you're interested in submitting a resource to be included here, please feel free to open a Pull Request and we'll review it! The resource should ideally demonstrate something new instead of duplicating an existing resource.
+
+- Check out the Autoformer blog-post in HuggingFace blog: [Yes, Transformers are Effective for Time Series Forecasting (+ Autoformer)](https://huggingface.co/blog/autoformer)
+
 ## AutoformerConfig
 
 [[autodoc]] AutoformerConfig
-
 
 ## AutoformerModel
 
 [[autodoc]] AutoformerModel
     - forward
-
 
 ## AutoformerForPrediction
 

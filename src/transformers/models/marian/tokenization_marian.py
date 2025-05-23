@@ -23,6 +23,7 @@ import sentencepiece
 
 from ...tokenization_utils import PreTrainedTokenizer
 from ...utils import logging
+from ...utils.import_utils import requires
 
 
 logger = logging.get_logger(__name__)
@@ -35,29 +36,13 @@ VOCAB_FILES_NAMES = {
     "tokenizer_config_file": "tokenizer_config.json",
 }
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "source_spm": {
-        "Helsinki-NLP/opus-mt-en-de": "https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/source.spm"
-    },
-    "target_spm": {
-        "Helsinki-NLP/opus-mt-en-de": "https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/target.spm"
-    },
-    "vocab": {
-        "Helsinki-NLP/opus-mt-en-de": "https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/vocab.json"
-    },
-    "tokenizer_config_file": {
-        "Helsinki-NLP/opus-mt-en-de": (
-            "https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/tokenizer_config.json"
-        )
-    },
-}
 
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {"Helsinki-NLP/opus-mt-en-de": 512}
-PRETRAINED_INIT_CONFIGURATION = {}
+SPIECE_UNDERLINE = "▁"
 
 # Example URL https://huggingface.co/Helsinki-NLP/opus-mt-en-de/resolve/main/vocab.json
 
 
+@requires(backends=("sentencepiece",))
 class MarianTokenizer(PreTrainedTokenizer):
     r"""
     Construct a Marian tokenizer. Based on [SentencePiece](https://github.com/google/sentencepiece).
@@ -118,9 +103,6 @@ class MarianTokenizer(PreTrainedTokenizer):
     ```"""
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    pretrained_init_configuration = PRETRAINED_INIT_CONFIGURATION
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
     language_code_re = re.compile(">>.+<<")  # type: re.Pattern
 
@@ -142,26 +124,13 @@ class MarianTokenizer(PreTrainedTokenizer):
     ) -> None:
         self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
 
-        super().__init__(
-            # bos_token=bos_token,  unused. Start decoding with config.decoder_start_token_id
-            source_lang=source_lang,
-            target_lang=target_lang,
-            unk_token=unk_token,
-            eos_token=eos_token,
-            pad_token=pad_token,
-            model_max_length=model_max_length,
-            sp_model_kwargs=self.sp_model_kwargs,
-            target_vocab_file=target_vocab_file,
-            separate_vocabs=separate_vocabs,
-            **kwargs,
-        )
         assert Path(source_spm).exists(), f"cannot find spm source {source_spm}"
 
         self.separate_vocabs = separate_vocabs
         self.encoder = load_json(vocab)
-        if self.unk_token not in self.encoder:
-            raise KeyError("<unk> token must be in vocab")
-        assert self.pad_token in self.encoder
+        if str(unk_token) not in self.encoder:
+            raise KeyError("<unk> token must be in the vocab")
+        assert str(pad_token) in self.encoder
 
         if separate_vocabs:
             self.target_encoder = load_json(target_vocab_file)
@@ -184,6 +153,20 @@ class MarianTokenizer(PreTrainedTokenizer):
         # Multilingual target side: default to using first supported language code.
 
         self._setup_normalizer()
+
+        super().__init__(
+            # bos_token=bos_token,  unused. Start decoding with config.decoder_start_token_id
+            source_lang=source_lang,
+            target_lang=target_lang,
+            unk_token=unk_token,
+            eos_token=eos_token,
+            pad_token=pad_token,
+            model_max_length=model_max_length,
+            sp_model_kwargs=self.sp_model_kwargs,
+            target_vocab_file=target_vocab_file,
+            separate_vocabs=separate_vocabs,
+            **kwargs,
+        )
 
     def _setup_normalizer(self):
         try:
@@ -278,6 +261,7 @@ class MarianTokenizer(PreTrainedTokenizer):
             else:
                 current_sub_tokens.append(token)
         out_string += sp_model.decode_pieces(current_sub_tokens)
+        out_string = out_string.replace(SPIECE_UNDERLINE, " ")
         return out_string.strip()
 
     def build_inputs_with_special_tokens(self, token_ids_0, token_ids_1=None) -> List[int]:
@@ -357,7 +341,7 @@ class MarianTokenizer(PreTrainedTokenizer):
     def __getstate__(self) -> Dict:
         state = self.__dict__.copy()
         state.update(
-            {k: None for k in ["spm_source", "spm_target", "current_spm", "punc_normalizer", "target_vocab_file"]}
+            dict.fromkeys(["spm_source", "spm_target", "current_spm", "punc_normalizer", "target_vocab_file"])
         )
         return state
 
@@ -407,3 +391,6 @@ def save_json(data, path: str) -> None:
 def load_json(path: str) -> Union[Dict, List]:
     with open(path, "r") as f:
         return json.load(f)
+
+
+__all__ = ["MarianTokenizer"]

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
-from typing import Iterable, List, Optional, Tuple, Union
+from collections.abc import Collection, Iterable
+from math import ceil
+from typing import Optional, Union
 
 import numpy as np
 
@@ -24,7 +24,6 @@ from .image_utils import (
     get_channel_dimension_axis,
     get_image_size,
     infer_channel_dimension_format,
-    to_numpy_array,
 )
 from .utils import ExplicitEnum, TensorType, is_jax_tensor, is_tf_tensor, is_torch_tensor
 from .utils.import_utils import (
@@ -57,19 +56,23 @@ def to_channel_dimension_format(
     input_channel_dim: Optional[Union[ChannelDimension, str]] = None,
 ) -> np.ndarray:
     """
-    Converts `image` to the channel dimension format specified by `channel_dim`.
+    Converts `image` to the channel dimension format specified by `channel_dim`. The input
+    can have arbitrary number of leading dimensions. Only last three dimension will be permuted
+    to format the `image`.
 
     Args:
         image (`numpy.ndarray`):
             The image to have its channel dimension set.
         channel_dim (`ChannelDimension`):
             The channel dimension format to use.
+        input_channel_dim (`ChannelDimension`, *optional*):
+            The channel dimension format of the input image. If not provided, it will be inferred from the input image.
 
     Returns:
         `np.ndarray`: The image with the channel dimension set to `channel_dim`.
     """
     if not isinstance(image, np.ndarray):
-        raise ValueError(f"Input image must be of type np.ndarray, got {type(image)}")
+        raise TypeError(f"Input image must be of type np.ndarray, got {type(image)}")
 
     if input_channel_dim is None:
         input_channel_dim = infer_channel_dimension_format(image)
@@ -79,17 +82,23 @@ def to_channel_dimension_format(
         return image
 
     if target_channel_dim == ChannelDimension.FIRST:
-        image = image.transpose((2, 0, 1))
+        axes = list(range(image.ndim - 3)) + [image.ndim - 1, image.ndim - 3, image.ndim - 2]
+        image = image.transpose(axes)
     elif target_channel_dim == ChannelDimension.LAST:
-        image = image.transpose((1, 2, 0))
+        axes = list(range(image.ndim - 3)) + [image.ndim - 2, image.ndim - 1, image.ndim - 3]
+        image = image.transpose(axes)
     else:
-        raise ValueError("Unsupported channel dimension format: {}".format(channel_dim))
+        raise ValueError(f"Unsupported channel dimension format: {channel_dim}")
 
     return image
 
 
 def rescale(
-    image: np.ndarray, scale: float, data_format: Optional[ChannelDimension] = None, dtype=np.float32
+    image: np.ndarray,
+    scale: float,
+    data_format: Optional[ChannelDimension] = None,
+    dtype: np.dtype = np.float32,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> np.ndarray:
     """
     Rescales `image` by `scale`.
@@ -104,17 +113,21 @@ def rescale(
         dtype (`np.dtype`, *optional*, defaults to `np.float32`):
             The dtype of the output image. Defaults to `np.float32`. Used for backwards compatibility with feature
             extractors.
+        input_data_format (`ChannelDimension`, *optional*):
+            The channel dimension format of the input image. If not provided, it will be inferred from the input image.
 
     Returns:
         `np.ndarray`: The rescaled image.
     """
     if not isinstance(image, np.ndarray):
-        raise ValueError(f"Input image must be of type np.ndarray, got {type(image)}")
+        raise TypeError(f"Input image must be of type np.ndarray, got {type(image)}")
 
-    rescaled_image = image * scale
+    rescaled_image = image.astype(np.float64) * scale  # Numpy type promotion has changed, so always upcast first
     if data_format is not None:
-        rescaled_image = to_channel_dimension_format(rescaled_image, data_format)
-    rescaled_image = rescaled_image.astype(dtype)
+        rescaled_image = to_channel_dimension_format(rescaled_image, data_format, input_data_format)
+
+    rescaled_image = rescaled_image.astype(dtype)  # Finally downcast to the desired dtype at the end
+
     return rescaled_image
 
 
@@ -148,6 +161,8 @@ def _rescale_for_pil_conversion(image):
 def to_pil_image(
     image: Union[np.ndarray, "PIL.Image.Image", "torch.Tensor", "tf.Tensor", "jnp.ndarray"],
     do_rescale: Optional[bool] = None,
+    image_mode: Optional[str] = None,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> "PIL.Image.Image":
     """
     Converts `image` to a PIL Image. Optionally rescales it and puts the channel dimension back as the last axis if
@@ -160,6 +175,10 @@ def to_pil_image(
             Whether or not to apply the scaling factor (to make pixel values integers between 0 and 255). Will default
             to `True` if the image type is a floating type and casting to `int` would result in a loss of precision,
             and `False` otherwise.
+        image_mode (`str`, *optional*):
+            The mode to use for the PIL image. If unset, will use the default mode for the input image type.
+        input_data_format (`ChannelDimension`, *optional*):
+            The channel dimension format of the input image. If unset, will use the inferred format from the input.
 
     Returns:
         `PIL.Image.Image`: The converted image.
@@ -175,10 +194,10 @@ def to_pil_image(
     elif is_jax_tensor(image):
         image = np.array(image)
     elif not isinstance(image, np.ndarray):
-        raise ValueError("Input image type not supported: {}".format(type(image)))
+        raise ValueError(f"Input image type not supported: {type(image)}")
 
-    # If the channel as been moved to first dim, we put it back at the end.
-    image = to_channel_dimension_format(image, ChannelDimension.LAST)
+    # If the channel has been moved to first dim, we put it back at the end.
+    image = to_channel_dimension_format(image, ChannelDimension.LAST, input_data_format)
 
     # If there is a single channel, we squeeze it, as otherwise PIL can't handle it.
     image = np.squeeze(image, axis=-1) if image.shape[-1] == 1 else image
@@ -190,15 +209,55 @@ def to_pil_image(
         image = rescale(image, 255)
 
     image = image.astype(np.uint8)
-    return PIL.Image.fromarray(image)
+    return PIL.Image.fromarray(image, mode=image_mode)
+
+
+def get_size_with_aspect_ratio(image_size, size, max_size=None) -> tuple[int, int]:
+    """
+    Computes the output image size given the input image size and the desired output size.
+
+    Args:
+        image_size (`Tuple[int, int]`):
+            The input image size.
+        size (`int`):
+            The desired output size.
+        max_size (`int`, *optional*):
+            The maximum allowed output size.
+    """
+    height, width = image_size
+    raw_size = None
+    if max_size is not None:
+        min_original_size = float(min((height, width)))
+        max_original_size = float(max((height, width)))
+        if max_original_size / min_original_size * size > max_size:
+            raw_size = max_size * min_original_size / max_original_size
+            size = int(round(raw_size))
+
+    if (height <= width and height == size) or (width <= height and width == size):
+        oh, ow = height, width
+    elif width < height:
+        ow = size
+        if max_size is not None and raw_size is not None:
+            oh = int(raw_size * height / width)
+        else:
+            oh = int(size * height / width)
+    else:
+        oh = size
+        if max_size is not None and raw_size is not None:
+            ow = int(raw_size * width / height)
+        else:
+            ow = int(size * width / height)
+
+    return (oh, ow)
 
 
 # Logic adapted from torchvision resizing logic: https://github.com/pytorch/vision/blob/511924c1ced4ce0461197e5caa64ce5b9e558aab/torchvision/transforms/functional.py#L366
 def get_resize_output_image_size(
     input_image: np.ndarray,
-    size: Union[int, Tuple[int, int], List[int], Tuple[int]],
+    size: Union[int, tuple[int, int], list[int], tuple[int]],
     default_to_square: bool = True,
     max_size: Optional[int] = None,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> tuple:
     """
     Find the target (height, width) dimension of the output image after resizing given the input image and the desired
@@ -207,7 +266,7 @@ def get_resize_output_image_size(
     Args:
         input_image (`np.ndarray`):
             The image to resize.
-        size (`int` or `Tuple[int, int]` or List[int] or Tuple[int]):
+        size (`int` or `Tuple[int, int]` or List[int] or `Tuple[int]`):
             The size to use for resizing the image. If `size` is a sequence like (h, w), output size will be matched to
             this.
 
@@ -224,6 +283,8 @@ def get_resize_output_image_size(
             than `max_size` after being resized according to `size`, then the image is resized again so that the longer
             edge is equal to `max_size`. As a result, `size` might be overruled, i.e the smaller edge may be shorter
             than `size`. Only used if `default_to_square` is `False`.
+        input_data_format (`ChannelDimension`, *optional*):
+            The channel dimension format of the input image. If unset, will use the inferred format from the input.
 
     Returns:
         `tuple`: The target (height, width) dimension of the output image after resizing.
@@ -240,7 +301,7 @@ def get_resize_output_image_size(
     if default_to_square:
         return (size, size)
 
-    height, width = get_image_size(input_image)
+    height, width = get_image_size(input_image, input_data_format)
     short, long = (width, height) if width <= height else (height, width)
     requested_new_short = size
 
@@ -259,18 +320,19 @@ def get_resize_output_image_size(
 
 
 def resize(
-    image,
-    size: Tuple[int, int],
+    image: np.ndarray,
+    size: tuple[int, int],
     resample: "PILImageResampling" = None,
     reducing_gap: Optional[int] = None,
     data_format: Optional[ChannelDimension] = None,
     return_numpy: bool = True,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> np.ndarray:
     """
     Resizes `image` to `(height, width)` specified by `size` using the PIL library.
 
     Args:
-        image (`PIL.Image.Image` or `np.ndarray` or `torch.Tensor`):
+        image (`np.ndarray`):
             The image to resize.
         size (`Tuple[int, int]`):
             The size to use for resizing the image.
@@ -284,6 +346,8 @@ def resize(
         return_numpy (`bool`, *optional*, defaults to `True`):
             Whether or not to return the resized image as a numpy array. If False a `PIL.Image.Image` object is
             returned.
+        input_data_format (`ChannelDimension`, *optional*):
+            The channel dimension format of the input image. If unset, will use the inferred format from the input.
 
     Returns:
         `np.ndarray`: The resized image.
@@ -297,14 +361,16 @@ def resize(
 
     # For all transformations, we want to keep the same data format as the input image unless otherwise specified.
     # The resized image from PIL will always have channels last, so find the input format first.
-    data_format = infer_channel_dimension_format(image) if data_format is None else data_format
+    if input_data_format is None:
+        input_data_format = infer_channel_dimension_format(image)
+    data_format = input_data_format if data_format is None else data_format
 
     # To maintain backwards compatibility with the resizing done in previous image feature extractors, we use
     # the pillow library to resize the image and then convert back to numpy
     do_rescale = False
     if not isinstance(image, PIL.Image.Image):
         do_rescale = _rescale_for_pil_conversion(image)
-        image = to_pil_image(image, do_rescale=do_rescale)
+        image = to_pil_image(image, do_rescale=do_rescale, input_data_format=input_data_format)
     height, width = size
     # PIL images are in the format (width, height)
     resized_image = image.resize((width, height), resample=resample, reducing_gap=reducing_gap)
@@ -326,9 +392,10 @@ def resize(
 
 def normalize(
     image: np.ndarray,
-    mean: Union[float, Iterable[float]],
-    std: Union[float, Iterable[float]],
+    mean: Union[float, Collection[float]],
+    std: Union[float, Collection[float]],
     data_format: Optional[ChannelDimension] = None,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> np.ndarray:
     """
     Normalizes `image` using the mean and standard deviation specified by `mean` and `std`.
@@ -338,40 +405,37 @@ def normalize(
     Args:
         image (`np.ndarray`):
             The image to normalize.
-        mean (`float` or `Iterable[float]`):
+        mean (`float` or `Collection[float]`):
             The mean to use for normalization.
-        std (`float` or `Iterable[float]`):
+        std (`float` or `Collection[float]`):
             The standard deviation to use for normalization.
         data_format (`ChannelDimension`, *optional*):
             The channel dimension format of the output image. If unset, will use the inferred format from the input.
+        input_data_format (`ChannelDimension`, *optional*):
+            The channel dimension format of the input image. If unset, will use the inferred format from the input.
     """
-    requires_backends(normalize, ["vision"])
-
-    if isinstance(image, PIL.Image.Image):
-        warnings.warn(
-            "PIL.Image.Image inputs are deprecated and will be removed in v4.26.0. Please use numpy arrays instead.",
-            FutureWarning,
-        )
-        # Convert PIL image to numpy array with the same logic as in the previous feature extractor normalize -
-        # casting to numpy array and dividing by 255.
-        image = to_numpy_array(image)
-        image = rescale(image, scale=1 / 255)
-
     if not isinstance(image, np.ndarray):
         raise ValueError("image must be a numpy array")
 
-    input_data_format = infer_channel_dimension_format(image)
-    channel_axis = get_channel_dimension_axis(image)
+    if input_data_format is None:
+        input_data_format = infer_channel_dimension_format(image)
+
+    channel_axis = get_channel_dimension_axis(image, input_data_format=input_data_format)
     num_channels = image.shape[channel_axis]
 
-    if isinstance(mean, Iterable):
+    # We cast to float32 to avoid errors that can occur when subtracting uint8 values.
+    # We preserve the original dtype if it is a float type to prevent upcasting float16.
+    if not np.issubdtype(image.dtype, np.floating):
+        image = image.astype(np.float32)
+
+    if isinstance(mean, Collection):
         if len(mean) != num_channels:
             raise ValueError(f"mean must have {num_channels} elements if it is an iterable, got {len(mean)}")
     else:
         mean = [mean] * num_channels
     mean = np.array(mean, dtype=image.dtype)
 
-    if isinstance(std, Iterable):
+    if isinstance(std, Collection):
         if len(std) != num_channels:
             raise ValueError(f"std must have {num_channels} elements if it is an iterable, got {len(std)}")
     else:
@@ -383,15 +447,15 @@ def normalize(
     else:
         image = ((image.T - mean) / std).T
 
-    image = to_channel_dimension_format(image, data_format) if data_format is not None else image
+    image = to_channel_dimension_format(image, data_format, input_data_format) if data_format is not None else image
     return image
 
 
 def center_crop(
     image: np.ndarray,
-    size: Tuple[int, int],
+    size: tuple[int, int],
     data_format: Optional[Union[str, ChannelDimension]] = None,
-    return_numpy: Optional[bool] = None,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> np.ndarray:
     """
     Crops the `image` to the specified `size` using a center crop. Note that if the image is too small to be cropped to
@@ -407,40 +471,30 @@ def center_crop(
                 - `"channels_first"` or `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
                 - `"channels_last"` or `ChannelDimension.LAST`: image in (height, width, num_channels) format.
             If unset, will use the inferred format of the input image.
-        return_numpy (`bool`, *optional*):
-            Whether or not to return the cropped image as a numpy array. Used for backwards compatibility with the
-            previous ImageFeatureExtractionMixin method.
-                - Unset: will return the same type as the input image.
-                - `True`: will return a numpy array.
-                - `False`: will return a `PIL.Image.Image` object.
+        input_data_format (`str` or `ChannelDimension`, *optional*):
+            The channel dimension format for the input image. Can be one of:
+                - `"channels_first"` or `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
+                - `"channels_last"` or `ChannelDimension.LAST`: image in (height, width, num_channels) format.
+            If unset, will use the inferred format of the input image.
     Returns:
         `np.ndarray`: The cropped image.
     """
     requires_backends(center_crop, ["vision"])
 
-    if isinstance(image, PIL.Image.Image):
-        warnings.warn(
-            "PIL.Image.Image inputs are deprecated and will be removed in v4.26.0. Please use numpy arrays instead.",
-            FutureWarning,
-        )
-        image = to_numpy_array(image)
-        return_numpy = False if return_numpy is None else return_numpy
-    else:
-        return_numpy = True if return_numpy is None else return_numpy
-
     if not isinstance(image, np.ndarray):
-        raise ValueError(f"Input image must be of type np.ndarray, got {type(image)}")
+        raise TypeError(f"Input image must be of type np.ndarray, got {type(image)}")
 
     if not isinstance(size, Iterable) or len(size) != 2:
         raise ValueError("size must have 2 elements representing the height and width of the output image")
 
-    input_data_format = infer_channel_dimension_format(image)
+    if input_data_format is None:
+        input_data_format = infer_channel_dimension_format(image)
     output_data_format = data_format if data_format is not None else input_data_format
 
     # We perform the crop in (C, H, W) format and then convert to the output format
-    image = to_channel_dimension_format(image, ChannelDimension.FIRST)
+    image = to_channel_dimension_format(image, ChannelDimension.FIRST, input_data_format)
 
-    orig_height, orig_width = get_image_size(image)
+    orig_height, orig_width = get_image_size(image, ChannelDimension.FIRST)
     crop_height, crop_width = size
     crop_height, crop_width = int(crop_height), int(crop_width)
 
@@ -454,7 +508,7 @@ def center_crop(
     # Check if cropped area is within image boundaries
     if top >= 0 and bottom <= orig_height and left >= 0 and right <= orig_width:
         image = image[..., top:bottom, left:right]
-        image = to_channel_dimension_format(image, output_data_format)
+        image = to_channel_dimension_format(image, output_data_format, ChannelDimension.FIRST)
         return image
 
     # Otherwise, we may need to pad if the image is too small. Oh joy...
@@ -464,9 +518,9 @@ def center_crop(
     new_image = np.zeros_like(image, shape=new_shape)
 
     # If the image is too small, pad it with zeros
-    top_pad = (new_height - orig_height) // 2
+    top_pad = ceil((new_height - orig_height) / 2)
     bottom_pad = top_pad + orig_height
-    left_pad = (new_width - orig_width) // 2
+    left_pad = ceil((new_width - orig_width) / 2)
     right_pad = left_pad + orig_width
     new_image[..., top_pad:bottom_pad, left_pad:right_pad] = image
 
@@ -476,10 +530,7 @@ def center_crop(
     right += left_pad
 
     new_image = new_image[..., max(0, top) : min(new_height, bottom), max(0, left) : min(new_width, right)]
-    new_image = to_channel_dimension_format(new_image, output_data_format)
-
-    if not return_numpy:
-        new_image = to_pil_image(new_image)
+    new_image = to_channel_dimension_format(new_image, output_data_format, ChannelDimension.FIRST)
 
     return new_image
 
@@ -521,7 +572,7 @@ def center_to_corners_format(bboxes_center: TensorType) -> TensorType:
 
     center format: contains the coordinate for the center of the box and its width, height dimensions
         (center_x, center_y, width, height)
-    corners format: contains the coodinates for the top-left and bottom-right corners of the box
+    corners format: contains the coordinates for the top-left and bottom-right corners of the box
         (top_left_x, top_left_y, bottom_right_x, bottom_right_y)
     """
     # Function is used during model forward pass, so we use the input framework if possible, without
@@ -579,7 +630,7 @@ def corners_to_center_format(bboxes_corners: TensorType) -> TensorType:
     """
     Converts bounding boxes from corners format to center format.
 
-    corners format: contains the coodinates for the top-left and bottom-right corners of the box
+    corners format: contains the coordinates for the top-left and bottom-right corners of the box
         (top_left_x, top_left_y, bottom_right_x, bottom_right_y)
     center format: contains the coordinate for the center of the box and its the width, height dimensions
         (center_x, center_y, width, height)
@@ -641,7 +692,7 @@ class PaddingMode(ExplicitEnum):
 
 def pad(
     image: np.ndarray,
-    padding: Union[int, Tuple[int, int], Iterable[Tuple[int, int]]],
+    padding: Union[int, tuple[int, int], Iterable[tuple[int, int]]],
     mode: PaddingMode = PaddingMode.CONSTANT,
     constant_values: Union[float, Iterable[float]] = 0.0,
     data_format: Optional[Union[str, ChannelDimension]] = None,
@@ -704,7 +755,7 @@ def pad(
         values = ((0, 0), *values) if input_data_format == ChannelDimension.FIRST else (*values, (0, 0))
 
         # Add additional padding if there's a batch dimension
-        values = (0, *values) if image.ndim == 4 else values
+        values = ((0, 0), *values) if image.ndim == 4 else values
         return values
 
     padding = _expand_for_data_format(padding)
@@ -721,7 +772,7 @@ def pad(
     else:
         raise ValueError(f"Invalid padding mode: {mode}")
 
-    image = to_channel_dimension_format(image, data_format) if data_format is not None else image
+    image = to_channel_dimension_format(image, data_format, input_data_format) if data_format is not None else image
     return image
 
 
@@ -730,7 +781,6 @@ def convert_to_rgb(image: ImageInput) -> ImageInput:
     """
     Converts an image to RGB format. Only converts if the image is of type PIL.Image.Image, otherwise returns the image
     as is.
-
     Args:
         image (Image):
             The image to convert.
@@ -740,11 +790,18 @@ def convert_to_rgb(image: ImageInput) -> ImageInput:
     if not isinstance(image, PIL.Image.Image):
         return image
 
+    if image.mode == "RGB":
+        return image
+
     image = image.convert("RGB")
     return image
 
 
-def flip_channel_order(image: np.ndarray, data_format: Optional[ChannelDimension] = None) -> np.ndarray:
+def flip_channel_order(
+    image: np.ndarray,
+    data_format: Optional[ChannelDimension] = None,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
+) -> np.ndarray:
     """
     Flips the channel order of the image.
 
@@ -758,9 +815,14 @@ def flip_channel_order(image: np.ndarray, data_format: Optional[ChannelDimension
                 - `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
                 - `ChannelDimension.LAST`: image in (height, width, num_channels) format.
             If unset, will use same as the input image.
+        input_data_format (`ChannelDimension`, *optional*):
+            The channel dimension format for the input image. Can be one of:
+                - `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
+                - `ChannelDimension.LAST`: image in (height, width, num_channels) format.
+            If unset, will use the inferred format of the input image.
     """
+    input_data_format = infer_channel_dimension_format(image) if input_data_format is None else input_data_format
 
-    input_data_format = infer_channel_dimension_format(image)
     if input_data_format == ChannelDimension.LAST:
         image = image[..., ::-1]
     elif input_data_format == ChannelDimension.FIRST:
@@ -769,5 +831,55 @@ def flip_channel_order(image: np.ndarray, data_format: Optional[ChannelDimension
         raise ValueError(f"Unsupported channel dimension: {input_data_format}")
 
     if data_format is not None:
-        image = to_channel_dimension_format(image, data_format)
+        image = to_channel_dimension_format(image, data_format, input_channel_dim=input_data_format)
     return image
+
+
+def _cast_tensor_to_float(x):
+    if x.is_floating_point():
+        return x
+    return x.float()
+
+
+def group_images_by_shape(
+    images: list["torch.Tensor"],
+) -> tuple[dict[tuple[int, int], list["torch.Tensor"]], dict[int, tuple[tuple[int, int], int]]]:
+    """
+    Groups images by shape.
+    Returns a dictionary with the shape as key and a list of images with that shape as value,
+    and a dictionary with the index of the image in the original list as key and the shape and index in the grouped list as value.
+    """
+    grouped_images = {}
+    grouped_images_index = {}
+    for i, image in enumerate(images):
+        shape = image.shape[1:]
+        if shape not in grouped_images:
+            grouped_images[shape] = []
+        grouped_images[shape].append(image)
+        grouped_images_index[i] = (shape, len(grouped_images[shape]) - 1)
+    # stack images with the same shape
+    grouped_images = {shape: torch.stack(images, dim=0) for shape, images in grouped_images.items()}
+    return grouped_images, grouped_images_index
+
+
+def reorder_images(
+    processed_images: dict[tuple[int, int], "torch.Tensor"], grouped_images_index: dict[int, tuple[int, int]]
+) -> list["torch.Tensor"]:
+    """
+    Reconstructs a list of images in the original order.
+    """
+    return [
+        processed_images[grouped_images_index[i][0]][grouped_images_index[i][1]]
+        for i in range(len(grouped_images_index))
+    ]
+
+
+class NumpyToTensor:
+    """
+    Convert a numpy array to a PyTorch tensor.
+    """
+
+    def __call__(self, image: np.ndarray):
+        # Same as in PyTorch, we assume incoming numpy images are in HWC format
+        # c.f. https://github.com/pytorch/vision/blob/61d97f41bc209e1407dcfbd685d2ee2da9c1cdad/torchvision/transforms/functional.py#L154
+        return torch.from_numpy(image.transpose(2, 0, 1)).contiguous()

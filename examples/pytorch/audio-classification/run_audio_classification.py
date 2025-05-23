@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2021 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -45,7 +44,7 @@ from transformers.utils.versions import require_version
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.31.0.dev0")
+check_min_version("4.53.0.dev0")
 
 require_version("datasets>=1.14.0", "To fix: pip install -r examples/pytorch/audio-classification/requirements.txt")
 
@@ -152,12 +151,22 @@ class ModelArguments:
     attention_mask: bool = field(
         default=True, metadata={"help": "Whether to generate an attention mask in the feature extractor."}
     )
-    use_auth_token: bool = field(
+    token: str = field(
+        default=None,
+        metadata={
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
+        },
+    )
+    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -173,14 +182,14 @@ class ModelArguments:
         if not self.freeze_feature_extractor and self.freeze_feature_encoder:
             warnings.warn(
                 "The argument `--freeze_feature_extractor` is deprecated and "
-                "will be removed in a future version. Use `--freeze_feature_encoder`"
+                "will be removed in a future version. Use `--freeze_feature_encoder` "
                 "instead. Setting `freeze_feature_encoder==True`.",
                 FutureWarning,
             )
         if self.freeze_feature_extractor and not self.freeze_feature_encoder:
             raise ValueError(
                 "The argument `--freeze_feature_extractor` is deprecated and "
-                "should not be used in combination with `--freeze_feature_encoder`."
+                "should not be used in combination with `--freeze_feature_encoder`. "
                 "Only make use of `--freeze_feature_encoder`."
             )
 
@@ -221,8 +230,8 @@ def main():
 
     # Log on each process the small summary:
     logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu} "
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
@@ -250,13 +259,15 @@ def main():
         data_args.dataset_name,
         data_args.dataset_config_name,
         split=data_args.train_split_name,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
     raw_datasets["eval"] = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
         split=data_args.eval_split_name,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
 
     if data_args.audio_column_name not in raw_datasets["train"].column_names:
@@ -280,7 +291,8 @@ def main():
         return_attention_mask=model_args.attention_mask,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
 
     # `datasets` takes care of automatically loading and resampling the audio,
@@ -323,7 +335,7 @@ def main():
         id2label[str(i)] = label
 
     # Load the accuracy metric from the datasets package
-    metric = evaluate.load("accuracy")
+    metric = evaluate.load("accuracy", cache_dir=model_args.cache_dir)
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with
     # `predictions` and `label_ids` fields) and has to return a dictionary string to float.
@@ -340,7 +352,8 @@ def main():
         finetuning_task="audio-classification",
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
     )
     model = AutoModelForAudioClassification.from_pretrained(
         model_args.model_name_or_path,
@@ -348,7 +361,8 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
 
@@ -379,7 +393,7 @@ def main():
         train_dataset=raw_datasets["train"] if training_args.do_train else None,
         eval_dataset=raw_datasets["eval"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
-        tokenizer=feature_extractor,
+        processing_class=feature_extractor,
     )
 
     # Training

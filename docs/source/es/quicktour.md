@@ -68,11 +68,13 @@ Instala las siguientes dependencias si aún no lo has hecho:
 
 <frameworkcontent>
 <pt>
+
 ```bash
 pip install torch
 ```
 </pt>
 <tf>
+
 ```bash
 pip install tensorflow
 ```
@@ -218,12 +220,13 @@ Pasa tu texto al tokenizador:
 El tokenizador devolverá un diccionario conteniendo:
 
 * [input_ids](./glossary#input-ids): representaciones numéricas de los tokens.
-* [atttention_mask](.glossary#attention-mask): indica cuáles tokens deben ser atendidos.
+* [attention_mask](.glossary#attention-mask): indica cuáles tokens deben ser atendidos.
 
 Como con el [`pipeline`], el tokenizador aceptará una lista de inputs. Además, el tokenizador también puede rellenar (pad, en inglés) y truncar el texto para devolver un lote (batch, en inglés) de longitud uniforme:
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> pt_batch = tokenizer(
 ...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
@@ -235,6 +238,7 @@ Como con el [`pipeline`], el tokenizador aceptará una lista de inputs. Además,
 ```
 </pt>
 <tf>
+
 ```py
 >>> tf_batch = tokenizer(
 ...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
@@ -377,19 +381,21 @@ Una característica particularmente interesante de 🤗 Transformers es la habil
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> from transformers import AutoModel
 
->>> tokenizer = AutoTokenizer.from_pretrained(tf_save_directory)
->>> pt_model = AutoModelForSequenceClassification.from_pretrained(tf_save_directory, from_tf=True)
+>>> tokenizer = AutoTokenizer.from_pretrained(pt_save_directory)
+>>> pt_model = AutoModelForSequenceClassification.from_pretrained(pt_save_directory, from_pt=True)
 ```
 </pt>
 <tf>
+
 ```py
 >>> from transformers import TFAutoModel
 
->>> tokenizer = AutoTokenizer.from_pretrained(pt_save_directory)
->>> tf_model = TFAutoModelForSequenceClassification.from_pretrained(pt_save_directory, from_pt=True)
+>>> tokenizer = AutoTokenizer.from_pretrained(tf_save_directory)
+>>> tf_model = TFAutoModelForSequenceClassification.from_pretrained(tf_save_directory, from_tf=True)
 ```
 </tf>
 </frameworkcontent>

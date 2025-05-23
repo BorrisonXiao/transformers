@@ -38,16 +38,18 @@ class LayoutLMv3Processor(ProcessorMixin):
     into token-level `labels` for token classification tasks (such as FUNSD, CORD).
 
     Args:
-        image_processor (`LayoutLMv3ImageProcessor`):
+        image_processor (`LayoutLMv3ImageProcessor`, *optional*):
             An instance of [`LayoutLMv3ImageProcessor`]. The image processor is a required input.
-        tokenizer (`LayoutLMv3Tokenizer` or `LayoutLMv3TokenizerFast`):
+        tokenizer (`LayoutLMv3Tokenizer` or `LayoutLMv3TokenizerFast`, *optional*):
             An instance of [`LayoutLMv3Tokenizer`] or [`LayoutLMv3TokenizerFast`]. The tokenizer is a required input.
     """
+
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "LayoutLMv3ImageProcessor"
     tokenizer_class = ("LayoutLMv3Tokenizer", "LayoutLMv3TokenizerFast")
 
     def __init__(self, image_processor=None, tokenizer=None, **kwargs):
+        feature_extractor = None
         if "feature_extractor" in kwargs:
             warnings.warn(
                 "The `feature_extractor` argument is deprecated and will be removed in v5, use `image_processor`"
@@ -69,7 +71,7 @@ class LayoutLMv3Processor(ProcessorMixin):
         images,
         text: Union[TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]] = None,
         text_pair: Optional[Union[PreTokenizedInput, List[PreTokenizedInput]]] = None,
-        boxes: Union[List[List[int]], List[List[List[int]]]] = None,
+        boxes: Optional[Union[List[List[int]], List[List[List[int]]]]] = None,
         word_labels: Optional[Union[List[int], List[List[int]]]] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
@@ -195,3 +197,6 @@ class LayoutLMv3Processor(ProcessorMixin):
             FutureWarning,
         )
         return self.image_processor
+
+
+__all__ = ["LayoutLMv3Processor"]

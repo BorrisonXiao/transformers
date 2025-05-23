@@ -16,6 +16,10 @@ rendered properly in your Markdown viewer.
 
 # LayoutLMV2
 
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
+
 ## Overview
 
 The LayoutLMV2 model was proposed in [LayoutLMv2: Multi-modal Pre-training for Visually-Rich Document Understanding](https://arxiv.org/abs/2012.14740) by Yang Xu, Yiheng Xu, Tengchao Lv, Lei Cui, Furu Wei, Guoxin Wang, Yijuan Lu,
@@ -50,13 +54,13 @@ this https URL.*
 
 LayoutLMv2 depends on `detectron2`, `torchvision` and `tesseract`. Run the
 following to install them:
-```
+```bash
 python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'
 python -m pip install torchvision tesseract
 ```
 (If you are developing for LayoutLMv2, note that passing the doctests also requires the installation of these packages.)
 
-Tips:
+## Usage tips
 
 - The main difference between LayoutLMv1 and LayoutLMv2 is that the latter incorporates visual embeddings during
   pre-training (while LayoutLMv1 only adds visual embeddings during fine-tuning).
@@ -150,23 +154,23 @@ A list of official Hugging Face and community (indicated by 🌎) resources to h
 ## Usage: LayoutLMv2Processor
 
 The easiest way to prepare data for the model is to use [`LayoutLMv2Processor`], which internally
-combines a feature extractor ([`LayoutLMv2FeatureExtractor`]) and a tokenizer
-([`LayoutLMv2Tokenizer`] or [`LayoutLMv2TokenizerFast`]). The feature extractor
+combines a image processor ([`LayoutLMv2ImageProcessor`]) and a tokenizer
+([`LayoutLMv2Tokenizer`] or [`LayoutLMv2TokenizerFast`]). The image processor
 handles the image modality, while the tokenizer handles the text modality. A processor combines both, which is ideal
 for a multi-modal model like LayoutLMv2. Note that you can still use both separately, if you only want to handle one
 modality.
 
 ```python
-from transformers import LayoutLMv2FeatureExtractor, LayoutLMv2TokenizerFast, LayoutLMv2Processor
+from transformers import LayoutLMv2ImageProcessor, LayoutLMv2TokenizerFast, LayoutLMv2Processor
 
-feature_extractor = LayoutLMv2FeatureExtractor()  # apply_ocr is set to True by default
+image_processor = LayoutLMv2ImageProcessor()  # apply_ocr is set to True by default
 tokenizer = LayoutLMv2TokenizerFast.from_pretrained("microsoft/layoutlmv2-base-uncased")
-processor = LayoutLMv2Processor(feature_extractor, tokenizer)
+processor = LayoutLMv2Processor(image_processor, tokenizer)
 ```
 
 In short, one can provide a document image (and possibly additional data) to [`LayoutLMv2Processor`],
 and it will create the inputs expected by the model. Internally, the processor first uses
-[`LayoutLMv2FeatureExtractor`] to apply OCR on the image to get a list of words and normalized
+[`LayoutLMv2ImageProcessor`] to apply OCR on the image to get a list of words and normalized
 bounding boxes, as well to resize the image to a given size in order to get the `image` input. The words and
 normalized bounding boxes are then provided to [`LayoutLMv2Tokenizer`] or
 [`LayoutLMv2TokenizerFast`], which converts them to token-level `input_ids`,
@@ -176,7 +180,7 @@ which are turned into token-level `labels`.
 [`LayoutLMv2Processor`] uses [PyTesseract](https://pypi.org/project/pytesseract/), a Python
 wrapper around Google's Tesseract OCR engine, under the hood. Note that you can still use your own OCR engine of
 choice, and provide the words and normalized boxes yourself. This requires initializing
-[`LayoutLMv2FeatureExtractor`] with `apply_ocr` set to `False`.
+[`LayoutLMv2ImageProcessor`] with `apply_ocr` set to `False`.
 
 In total, there are 5 use cases that are supported by the processor. Below, we list them all. Note that each of these
 use cases work for both batched and non-batched inputs (we illustrate them for non-batched inputs).
@@ -184,7 +188,7 @@ use cases work for both batched and non-batched inputs (we illustrate them for n
 **Use case 1: document image classification (training, inference) + token classification (inference), apply_ocr =
 True**
 
-This is the simplest case, in which the processor (actually the feature extractor) will perform OCR on the image to get
+This is the simplest case, in which the processor (actually the image processor) will perform OCR on the image to get
 the words and normalized bounding boxes.
 
 ```python
@@ -205,7 +209,7 @@ print(encoding.keys())
 
 **Use case 2: document image classification (training, inference) + token classification (inference), apply_ocr=False**
 
-In case one wants to do OCR themselves, one can initialize the feature extractor with `apply_ocr` set to
+In case one wants to do OCR themselves, one can initialize the image processor with `apply_ocr` set to
 `False`. In that case, one should provide the words and corresponding (normalized) bounding boxes themselves to
 the processor.
 
@@ -304,6 +308,11 @@ print(encoding.keys())
 ## LayoutLMv2ImageProcessor
 
 [[autodoc]] LayoutLMv2ImageProcessor
+    - preprocess
+
+## LayoutLMv2ImageProcessorFast
+
+[[autodoc]] LayoutLMv2ImageProcessorFast
     - preprocess
 
 ## LayoutLMv2Tokenizer

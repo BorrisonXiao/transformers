@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -54,7 +53,7 @@ class TFRemBertModelTester:
         hidden_size=32,
         input_embedding_size=18,
         output_embedding_size=43,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -79,7 +78,7 @@ class TFRemBertModelTester:
         self.hidden_size = 32
         self.input_embedding_size = input_embedding_size
         self.output_embedding_size = output_embedding_size
-        self.num_hidden_layers = 5
+        self.num_hidden_layers = 2
         self.num_attention_heads = 4
         self.intermediate_size = 37
         self.hidden_act = "gelu"
@@ -619,7 +618,7 @@ class TFRemBertModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_causal_lm_base_model(self):
         """Test the base model of the causal LM model
 
-        is_deocder=True, no cross_attention, no encoder outputs
+        is_decoder=True, no cross_attention, no encoder outputs
         """
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_causal_lm_base_model(*config_and_inputs)
@@ -627,7 +626,7 @@ class TFRemBertModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_model_as_decoder(self):
         """Test the base model as a decoder (of an encoder-decoder architecture)
 
-        is_deocder=True + cross_attention + pass encoder outputs
+        is_decoder=True + cross_attention + pass encoder outputs
         """
         config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
         self.model_tester.create_and_check_model_as_decoder(*config_and_inputs)

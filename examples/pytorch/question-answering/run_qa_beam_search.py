@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2020 The HuggingFace Team All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,7 +47,7 @@ from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.31.0.dev0")
+check_min_version("4.53.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/question-answering/requirements.txt")
 
@@ -78,12 +77,12 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    use_auth_token: bool = field(
-        default=False,
+    token: str = field(
+        default=None,
         metadata={
             "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
             )
         },
     )
@@ -100,6 +99,16 @@ class DataTrainingArguments:
     )
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    trust_remote_code: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
+            )
+        },
     )
     train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a text file)."})
     validation_file: Optional[str] = field(
@@ -250,8 +259,8 @@ def main():
 
     # Log on each process the small summary:
     logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
@@ -288,7 +297,8 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
+            trust_remote_code=data_args.trust_remote_code,
         )
     else:
         data_files = {}
@@ -306,10 +316,10 @@ def main():
             data_files=data_files,
             field="data",
             cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
+    # https://huggingface.co/docs/datasets/loading_datasets.
 
     # Load pretrained model and tokenizer
     #
@@ -320,13 +330,13 @@ def main():
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
     )
     tokenizer = XLNetTokenizerFast.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
     )
     model = XLNetForQuestionAnswering.from_pretrained(
         model_args.model_name_or_path,
@@ -334,11 +344,11 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        token=model_args.token,
     )
 
     # Preprocessing the datasets.
-    # Preprocessing is slighlty different for training and evaluation.
+    # Preprocessing is slightly different for training and evaluation.
     if training_args.do_train:
         column_names = raw_datasets["train"].column_names
     elif training_args.do_eval:
@@ -354,7 +364,7 @@ def main():
 
     if data_args.max_seq_length > tokenizer.model_max_length:
         logger.warning(
-            f"The max_seq_length passed ({data_args.max_seq_length}) is larger than the maximum length for the"
+            f"The max_seq_length passed ({data_args.max_seq_length}) is larger than the maximum length for the "
             f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
         )
     max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
@@ -401,7 +411,12 @@ def main():
         for i, offsets in enumerate(offset_mapping):
             # We will label impossible answers with the index of the CLS token.
             input_ids = tokenized_examples["input_ids"][i]
-            cls_index = input_ids.index(tokenizer.cls_token_id)
+            if tokenizer.cls_token_id in input_ids:
+                cls_index = input_ids.index(tokenizer.cls_token_id)
+            elif tokenizer.bos_token_id in input_ids:
+                cls_index = input_ids.index(tokenizer.bos_token_id)
+            else:
+                cls_index = 0
             tokenized_examples["cls_index"].append(cls_index)
 
             # Grab the sequence corresponding to that example (to know what is the context and what is the question).
@@ -518,7 +533,12 @@ def main():
 
         for i, input_ids in enumerate(tokenized_examples["input_ids"]):
             # Find the CLS token in the input ids.
-            cls_index = input_ids.index(tokenizer.cls_token_id)
+            if tokenizer.cls_token_id in input_ids:
+                cls_index = input_ids.index(tokenizer.cls_token_id)
+            elif tokenizer.bos_token_id in input_ids:
+                cls_index = input_ids.index(tokenizer.bos_token_id)
+            else:
+                cls_index = 0
             tokenized_examples["cls_index"].append(cls_index)
 
             # Grab the sequence corresponding to that example (to know what is the context and what is the question).
@@ -631,7 +651,9 @@ def main():
         references = [{"id": ex["id"], "answers": ex[answer_column_name]} for ex in examples]
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
-    metric = evaluate.load("squad_v2" if data_args.version_2_with_negative else "squad")
+    metric = evaluate.load(
+        "squad_v2" if data_args.version_2_with_negative else "squad", cache_dir=model_args.cache_dir
+    )
 
     def compute_metrics(p: EvalPrediction):
         return metric.compute(predictions=p.predictions, references=p.label_ids)
@@ -643,7 +665,7 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         eval_examples=eval_examples if training_args.do_eval else None,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
         post_process_function=post_processing_function,
         compute_metrics=compute_metrics,

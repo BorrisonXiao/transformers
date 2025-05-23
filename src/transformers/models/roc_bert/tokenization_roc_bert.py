@@ -47,28 +47,6 @@ VOCAB_FILES_NAMES = {
     "word_pronunciation_file": "word_pronunciation.json",
 }
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "weiweishi/roc-bert-base-zh": "https://huggingface.co/weiweishi/roc-bert-base-zh/resolve/main/vocab.txt"
-    },
-    "word_shape_file": {
-        "weiweishi/roc-bert-base-zh": "https://huggingface.co/weiweishi/roc-bert-base-zh/resolve/main/word_shape.json"
-    },
-    "word_pronunciation_file": {
-        "weiweishi/roc-bert-base-zh": (
-            "https://huggingface.co/weiweishi/roc-bert-base-zh/resolve/main/word_pronunciation.json"
-        )
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "weiweishi/roc-bert-base-zh": 512,
-}
-
-PRETRAINED_INIT_CONFIGURATION = {
-    "weiweishi/roc-bert-base-zh": {"do_lower_case": True},
-}
-
 
 # Copied from transformers.models.bert.tokenization_bert.load_vocab
 def load_vocab(vocab_file):
@@ -135,9 +113,6 @@ class RoCBertTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    pretrained_init_configuration = PRETRAINED_INIT_CONFIGURATION
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(
         self,
@@ -156,20 +131,6 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         strip_accents=None,
         **kwargs,
     ):
-        super().__init__(
-            do_lower_case=do_lower_case,
-            do_basic_tokenize=do_basic_tokenize,
-            never_split=never_split,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            pad_token=pad_token,
-            cls_token=cls_token,
-            mask_token=mask_token,
-            tokenize_chinese_chars=tokenize_chinese_chars,
-            strip_accents=strip_accents,
-            **kwargs,
-        )
-
         for cur_file in [vocab_file, word_shape_file, word_pronunciation_file]:
             if cur_file is None or not os.path.isfile(cur_file):
                 raise ValueError(
@@ -195,7 +156,20 @@ class RoCBertTokenizer(PreTrainedTokenizer):
                 tokenize_chinese_chars=tokenize_chinese_chars,
                 strip_accents=strip_accents,
             )
-        self.wordpiece_tokenizer = RoCBertWordpieceTokenizer(vocab=self.vocab, unk_token=self.unk_token)
+        self.wordpiece_tokenizer = RoCBertWordpieceTokenizer(vocab=self.vocab, unk_token=str(unk_token))
+        super().__init__(
+            do_lower_case=do_lower_case,
+            do_basic_tokenize=do_basic_tokenize,
+            never_split=never_split,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            pad_token=pad_token,
+            cls_token=cls_token,
+            mask_token=mask_token,
+            tokenize_chinese_chars=tokenize_chinese_chars,
+            strip_accents=strip_accents,
+            **kwargs,
+        )
 
     @property
     def do_lower_case(self):
@@ -210,10 +184,12 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         return dict(self.vocab, **self.added_tokens_encoder)
 
     # Copied from transformers.models.bert.tokenization_bert.BertTokenizer._tokenize
-    def _tokenize(self, text):
+    def _tokenize(self, text, split_special_tokens=False):
         split_tokens = []
         if self.do_basic_tokenize:
-            for token in self.basic_tokenizer.tokenize(text, never_split=self.all_special_tokens):
+            for token in self.basic_tokenizer.tokenize(
+                text, never_split=self.all_special_tokens if not split_special_tokens else None
+            ):
                 # If the token is part of the never_split set
                 if token in self.basic_tokenizer.never_split:
                     split_tokens.append(token)
@@ -234,6 +210,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: bool = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -307,6 +284,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_tensors=return_tensors,
             prepend_batch_axis=True,
             return_attention_mask=return_attention_mask,
@@ -332,6 +310,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -486,6 +465,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
                 max_length=max_length,
                 padding=padding_strategy.value,
                 pad_to_multiple_of=pad_to_multiple_of,
+                padding_side=padding_side,
                 return_attention_mask=return_attention_mask,
             )
 
@@ -504,6 +484,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_attention_mask: Optional[bool] = None,
     ) -> dict:
         # Load from model defaults
@@ -526,8 +507,9 @@ class RoCBertTokenizer(PreTrainedTokenizer):
 
         if needs_to_be_padded:
             difference = max_length - len(required_input)
+            padding_side = padding_side if padding_side is not None else self.padding_side
 
-            if self.padding_side == "right":
+            if padding_side == "right":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"] + [0] * difference
                 if "token_type_ids" in encoded_inputs:
@@ -540,7 +522,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
                     if key in encoded_inputs:
                         encoded_inputs[key] = encoded_inputs[key] + [self.pad_token_id] * difference
                 encoded_inputs[self.model_input_names[0]] = required_input + [self.pad_token_id] * difference
-            elif self.padding_side == "left":
+            elif padding_side == "left":
                 if return_attention_mask:
                     encoded_inputs["attention_mask"] = [0] * difference + encoded_inputs["attention_mask"]
                 if "token_type_ids" in encoded_inputs:
@@ -554,7 +536,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
                         encoded_inputs[key] = [self.pad_token_id] * difference + encoded_inputs[key]
                 encoded_inputs[self.model_input_names[0]] = [self.pad_token_id] * difference + required_input
             else:
-                raise ValueError("Invalid padding strategy:" + str(self.padding_side))
+                raise ValueError("Invalid padding strategy:" + str(padding_side))
 
         return encoded_inputs
 
@@ -575,6 +557,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         stride: int = 0,
         is_split_into_words: bool = False,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -651,6 +634,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
             max_length=max_length,
             stride=stride,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
             return_token_type_ids=return_token_type_ids,
             return_overflowing_tokens=return_overflowing_tokens,
@@ -674,6 +658,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
+        padding_side: Optional[str] = None,
         return_tensors: Optional[str] = None,
         return_token_type_ids: Optional[bool] = None,
         return_attention_mask: Optional[bool] = None,
@@ -710,6 +695,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
                 max_length=max_length,
                 stride=stride,
                 pad_to_multiple_of=None,  # we pad in batch afterward
+                padding_side=None,  # we pad in batch afterward
                 return_attention_mask=False,  # we pad in batch afterward
                 return_token_type_ids=return_token_type_ids,
                 return_overflowing_tokens=return_overflowing_tokens,
@@ -730,6 +716,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
             padding=padding_strategy.value,
             max_length=max_length,
             pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
             return_attention_mask=return_attention_mask,
         )
 
@@ -783,8 +770,8 @@ class RoCBertTokenizer(PreTrainedTokenizer):
         self,
         token_ids_0: List[int],
         token_ids_1: Optional[List[int]] = None,
-        cls_token_id: int = None,
-        sep_token_id: int = None,
+        cls_token_id: Optional[int] = None,
+        sep_token_id: Optional[int] = None,
     ) -> List[int]:
         """
         Build model inputs from a sequence or a pair of sequence for sequence classification tasks by concatenating and
@@ -913,7 +900,7 @@ class RoCBertTokenizer(PreTrainedTokenizer):
 
 
 # Copied from  transformers.models.bert.tokenization_bert.BasicTokenizer with BasicTokenizer->RoCBertBasicTokenizer
-class RoCBertBasicTokenizer(object):
+class RoCBertBasicTokenizer:
     """
     Constructs a RoCBertBasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -931,20 +918,30 @@ class RoCBertBasicTokenizer(object):
         strip_accents (`bool`, *optional*):
             Whether or not to strip all accents. If this option is not specified, then it will be determined by the
             value for `lowercase` (as in the original BERT).
+        do_split_on_punc (`bool`, *optional*, defaults to `True`):
+            In some instances we want to skip the basic punctuation splitting so that later tokenization can capture
+            the full context of the words, such as contractions.
     """
 
-    def __init__(self, do_lower_case=True, never_split=None, tokenize_chinese_chars=True, strip_accents=None):
+    def __init__(
+        self,
+        do_lower_case=True,
+        never_split=None,
+        tokenize_chinese_chars=True,
+        strip_accents=None,
+        do_split_on_punc=True,
+    ):
         if never_split is None:
             never_split = []
         self.do_lower_case = do_lower_case
         self.never_split = set(never_split)
         self.tokenize_chinese_chars = tokenize_chinese_chars
         self.strip_accents = strip_accents
+        self.do_split_on_punc = do_split_on_punc
 
     def tokenize(self, text, never_split=None):
         """
-        Basic Tokenization of a piece of text. Split on "white spaces" only, for sub-word tokenization, see
-        WordPieceTokenizer.
+        Basic Tokenization of a piece of text. For sub-word tokenization, see WordPieceTokenizer.
 
         Args:
             never_split (`List[str]`, *optional*)
@@ -963,7 +960,9 @@ class RoCBertBasicTokenizer(object):
         # words in the English Wikipedia.).
         if self.tokenize_chinese_chars:
             text = self._tokenize_chinese_chars(text)
-        orig_tokens = whitespace_tokenize(text)
+        # prevents treating the same character with different unicode codepoints as different characters
+        unicode_normalized_text = unicodedata.normalize("NFC", text)
+        orig_tokens = whitespace_tokenize(unicode_normalized_text)
         split_tokens = []
         for token in orig_tokens:
             if token not in never_split:
@@ -991,7 +990,7 @@ class RoCBertBasicTokenizer(object):
 
     def _run_split_on_punc(self, text, never_split=None):
         """Splits punctuation on a piece of text."""
-        if never_split is not None and text in never_split:
+        if not self.do_split_on_punc or (never_split is not None and text in never_split):
             return [text]
         chars = list(text)
         i = 0
@@ -1063,7 +1062,7 @@ class RoCBertBasicTokenizer(object):
 
 
 # Copied from  transformers.models.bert.tokenization_bert.WordpieceTokenizer with WordpieceTokenizer->RoCBertWordpieceTokenizer
-class RoCBertWordpieceTokenizer(object):
+class RoCBertWordpieceTokenizer:
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):
@@ -1076,7 +1075,7 @@ class RoCBertWordpieceTokenizer(object):
         Tokenizes a piece of text into its word pieces. This uses a greedy longest-match-first algorithm to perform
         tokenization using the given vocabulary.
 
-        For example, `input = "unaffable"` wil return as output `["un", "##aff", "##able"]`.
+        For example, `input = "unaffable"` will return as output `["un", "##aff", "##able"]`.
 
         Args:
             text: A single token or whitespace separated tokens. This should have
@@ -1118,3 +1117,6 @@ class RoCBertWordpieceTokenizer(object):
             else:
                 output_tokens.extend(sub_tokens)
         return output_tokens
+
+
+__all__ = ["RoCBertTokenizer"]

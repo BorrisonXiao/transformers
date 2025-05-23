@@ -1,25 +1,25 @@
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ..utils import add_end_docstrings, is_torch_available, is_vision_available, logging, requires_backends
-from .base import PIPELINE_INIT_ARGS, ChunkPipeline
+from .base import ChunkPipeline, build_pipeline_init_args
 
 
 if is_vision_available():
     from PIL import Image
 
-    from ..image_utils import load_image
+    from ..image_utils import load_image, valid_images
 
 if is_torch_available():
     import torch
 
     from transformers.modeling_outputs import BaseModelOutput
 
-    from ..models.auto.modeling_auto import MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING
+    from ..models.auto.modeling_auto import MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING_NAMES
 
 logger = logging.get_logger(__name__)
 
 
-@add_end_docstrings(PIPELINE_INIT_ARGS)
+@add_end_docstrings(build_pipeline_init_args(has_image_processor=True))
 class ZeroShotObjectDetectionPipeline(ChunkPipeline):
     """
     Zero shot object detection pipeline using `OwlViTForObjectDetection`. This pipeline predicts bounding boxes of
@@ -60,12 +60,12 @@ class ZeroShotObjectDetectionPipeline(ChunkPipeline):
             raise ValueError(f"The {self.__class__} is only available in PyTorch.")
 
         requires_backends(self, "vision")
-        self.check_model_type(MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING)
+        self.check_model_type(MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING_NAMES)
 
     def __call__(
         self,
         image: Union[str, "Image.Image", List[Dict[str, Any]]],
-        candidate_labels: Union[str, List[str]] = None,
+        candidate_labels: Optional[Union[str, List[str]]] = None,
         **kwargs,
     ):
         """
@@ -111,6 +111,10 @@ class ZeroShotObjectDetectionPipeline(ChunkPipeline):
                 The number of top predictions that will be returned by the pipeline. If the provided number is `None`
                 or higher than the number of predictions available, it will default to the number of predictions.
 
+            timeout (`float`, *optional*, defaults to None):
+                The maximum time in seconds to wait for fetching images from the web. If None, no timeout is set and
+                the call may block forever.
+
 
         Return:
             A list of lists containing prediction results, one list per input image. Each list contains dictionaries
@@ -126,21 +130,39 @@ class ZeroShotObjectDetectionPipeline(ChunkPipeline):
 
         if isinstance(image, (str, Image.Image)):
             inputs = {"image": image, "candidate_labels": candidate_labels}
+        elif isinstance(image, (list, tuple)) and valid_images(image):
+            return list(
+                super().__call__(
+                    ({"image": img, "candidate_labels": labels} for img, labels in zip(image, candidate_labels)),
+                    **kwargs,
+                )
+            )
         else:
+            """
+            Supports the following format
+            - {"image": image, "candidate_labels": candidate_labels}
+            - [{"image": image, "candidate_labels": candidate_labels}]
+            - Generator and datasets
+            This is a common pattern in other multimodal pipelines, so we support it here as well.
+            """
             inputs = image
+
         results = super().__call__(inputs, **kwargs)
         return results
 
     def _sanitize_parameters(self, **kwargs):
+        preprocess_params = {}
+        if "timeout" in kwargs:
+            preprocess_params["timeout"] = kwargs["timeout"]
         postprocess_params = {}
         if "threshold" in kwargs:
             postprocess_params["threshold"] = kwargs["threshold"]
         if "top_k" in kwargs:
             postprocess_params["top_k"] = kwargs["top_k"]
-        return {}, {}, postprocess_params
+        return preprocess_params, {}, postprocess_params
 
-    def preprocess(self, inputs):
-        image = load_image(inputs["image"])
+    def preprocess(self, inputs, timeout=None):
+        image = load_image(inputs["image"], timeout=timeout)
         candidate_labels = inputs["candidate_labels"]
         if isinstance(candidate_labels, str):
             candidate_labels = candidate_labels.split(",")
@@ -149,6 +171,8 @@ class ZeroShotObjectDetectionPipeline(ChunkPipeline):
         for i, candidate_label in enumerate(candidate_labels):
             text_inputs = self.tokenizer(candidate_label, return_tensors=self.framework)
             image_features = self.image_processor(image, return_tensors=self.framework)
+            if self.framework == "pt":
+                image_features = image_features.to(self.torch_dtype)
             yield {
                 "is_last": i == len(candidate_labels) - 1,
                 "target_size": target_size,

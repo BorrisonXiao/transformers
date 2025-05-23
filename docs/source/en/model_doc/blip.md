@@ -16,11 +16,16 @@ rendered properly in your Markdown viewer.
 
 # BLIP
 
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+<img alt="TensorFlow" src="https://img.shields.io/badge/TensorFlow-FF6F00?style=flat&logo=tensorflow&logoColor=white">
+</div>
+
 ## Overview
 
 The BLIP model was proposed in [BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation](https://arxiv.org/abs/2201.12086) by Junnan Li, Dongxu Li, Caiming Xiong, Steven Hoi.
 
-BLIP is a model that is able to perform various multi-modal tasks including
+BLIP is a model that is able to perform various multi-modal tasks including:
 - Visual Question Answering 
 - Image-Text retrieval (Image-text matching)
 - Image Captioning
@@ -30,7 +35,7 @@ The abstract from the paper is the following:
 *Vision-Language Pre-training (VLP) has advanced the performance for many vision-language tasks. 
 However, most existing pre-trained models only excel in either understanding-based tasks or generation-based tasks. Furthermore, performance improvement has been largely achieved by scaling up the dataset with noisy image-text pairs collected from the web, which is a suboptimal source of supervision. In this paper, we propose BLIP, a new VLP framework which transfers flexibly to both vision-language understanding and generation tasks. BLIP effectively utilizes the noisy web data by bootstrapping the captions, where a captioner generates synthetic captions and a filter removes the noisy ones. We achieve state-of-the-art results on a wide range of vision-language tasks, such as image-text retrieval (+2.7% in average recall@1), image captioning (+2.8% in CIDEr), and VQA (+1.6% in VQA score). BLIP also demonstrates strong generalization ability when directly transferred to videolanguage tasks in a zero-shot manner. Code, models, and datasets are released.*
 
-![BLIP.gif](https://s3.amazonaws.com/moonup/production/uploads/1670928184033-62441d1d9fdefb55a0b7d12c.gif)
+![BLIP.gif](https://cdn-uploads.huggingface.co/production/uploads/1670928184033-62441d1d9fdefb55a0b7d12c.gif)
 
 This model was contributed by [ybelkada](https://huggingface.co/ybelkada).
 The original code can be found [here](https://github.com/salesforce/BLIP).
@@ -38,7 +43,6 @@ The original code can be found [here](https://github.com/salesforce/BLIP).
 ## Resources
 
 - [Jupyter notebook](https://github.com/huggingface/notebooks/blob/main/examples/image_captioning_blip.ipynb) on how to fine-tune BLIP for image captioning on a custom dataset
-
 
 ## BlipConfig
 
@@ -57,13 +61,22 @@ The original code can be found [here](https://github.com/salesforce/BLIP).
 
 [[autodoc]] BlipProcessor
 
-
 ## BlipImageProcessor
 
 [[autodoc]] BlipImageProcessor
     - preprocess
 
+## BlipImageProcessorFast
+
+[[autodoc]] BlipImageProcessorFast
+    - preprocess
+
+<frameworkcontent>
+<pt>
+
 ## BlipModel
+
+`BlipModel` is going to be deprecated in future versions, please use `BlipForConditionalGeneration`, `BlipForImageTextRetrieval` or `BlipForQuestionAnswering` depending on your usecase.
 
 [[autodoc]] BlipModel
     - forward
@@ -75,29 +88,33 @@ The original code can be found [here](https://github.com/salesforce/BLIP).
 [[autodoc]] BlipTextModel
     - forward
 
+## BlipTextLMHeadModel
+
+[[autodoc]] BlipTextLMHeadModel
+- forward
 
 ## BlipVisionModel
 
 [[autodoc]] BlipVisionModel
     - forward
 
-
 ## BlipForConditionalGeneration
 
 [[autodoc]] BlipForConditionalGeneration
     - forward
-
 
 ## BlipForImageTextRetrieval
 
 [[autodoc]] BlipForImageTextRetrieval
     - forward
 
-
 ## BlipForQuestionAnswering
 
 [[autodoc]] BlipForQuestionAnswering
     - forward
+
+</pt>
+<tf>
 
 ## TFBlipModel
 
@@ -111,26 +128,29 @@ The original code can be found [here](https://github.com/salesforce/BLIP).
 [[autodoc]] TFBlipTextModel
     - call
 
+## TFBlipTextLMHeadModel
+
+[[autodoc]] TFBlipTextLMHeadModel
+- forward
 
 ## TFBlipVisionModel
 
 [[autodoc]] TFBlipVisionModel
     - call
 
-
 ## TFBlipForConditionalGeneration
 
 [[autodoc]] TFBlipForConditionalGeneration
     - call
-
 
 ## TFBlipForImageTextRetrieval
 
 [[autodoc]] TFBlipForImageTextRetrieval
     - call
 
-
 ## TFBlipForQuestionAnswering
 
 [[autodoc]] TFBlipForQuestionAnswering
     - call
+</tf>
+</frameworkcontent>

@@ -42,7 +42,7 @@ TF_LOGITS_PROCESSOR_INPUTS_DOCSTRING = r"""
         cur_len (`int`):
             The current length of valid input sequence tokens. In the TF implementation, the input_ids' sequence length
             is the maximum length generate can produce, and we need to know which of its tokens are valid.
-        kwargs:
+        kwargs (`Dict[str, Any]`, *optional*):
             Additional logits processor specific kwargs.
 
     Return:
@@ -122,7 +122,7 @@ class TFTopKLogitsWarper(TFLogitsWarper):
     Args:
         top_k (`int`):
             The number of highest probability vocabulary tokens to keep for top-k-filtering.
-        filter_value (`float`, *optional*, defaults to `-float("Inf")`):
+        filter_value (`float`, *optional*, defaults to -inf):
             All filtered values will be set to this float value.
         min_tokens_to_keep (`int`, *optional*, defaults to 1):
             Minimum number of tokens that cannot be filtered.
@@ -151,7 +151,7 @@ class TFTopPLogitsWarper(TFLogitsWarper):
         top_p (`float`):
             If set to < 1, only the smallest set of most probable tokens with probabilities that add up to `top_p` or
             higher are kept for generation.
-        filter_value (`float`, *optional*, defaults to `-float("Inf")`):
+        filter_value (`float`, *optional*, defaults to -inf):
             All filtered values will be set to this float value.
         min_tokens_to_keep (`int`, *optional*, defaults to 1):
             Minimum number of tokens that cannot be filtered.
@@ -160,8 +160,8 @@ class TFTopPLogitsWarper(TFLogitsWarper):
     def __init__(self, top_p: float, filter_value: float = -float("Inf"), min_tokens_to_keep: int = 1):
         if not isinstance(top_p, float) or (top_p < 0 or top_p > 1.0):
             raise ValueError(f"`top_p` has to be a float > 0 and < 1, but is {top_p}")
-        if not isinstance(min_tokens_to_keep, int) or (min_tokens_to_keep < 0):
-            raise ValueError(f"`min_tokens_to_keep` has to be a non-negative integer, but is {min_tokens_to_keep}")
+        if not isinstance(min_tokens_to_keep, int) or (min_tokens_to_keep < 1):
+            raise ValueError(f"`min_tokens_to_keep` has to be a positive integer, but is {min_tokens_to_keep}")
 
         self.top_p = top_p
         self.filter_value = filter_value
@@ -318,7 +318,7 @@ class TFNoBadWordsLogitsProcessor(TFLogitsProcessor):
         self.bad_word_seqs_ids = tf.ragged.constant(bad_words_ids).to_tensor(default_value=-1)
         # 2. a tensor with the unpadded length of each forbidden sequence, for quick length comparisons
         bad_word_seqs_len = [len(bad_words) for bad_words in bad_words_ids]
-        if any([word_len == 0 for word_len in bad_word_seqs_len]):
+        if any(word_len == 0 for word_len in bad_word_seqs_len):
             raise ValueError(f"Banned words token sequences {bad_words_ids} cannot have an empty list")
         self.bad_word_seqs_len = tf.convert_to_tensor(bad_word_seqs_len, dtype=tf.int32)
         # 3. a tensor containing the last token for each sequence, for easy access to the tokens that may be banned
@@ -343,7 +343,7 @@ class TFNoBadWordsLogitsProcessor(TFLogitsProcessor):
                 )
 
             def _match_found():
-                # Finaly, runs the actual comparison. Can only be called if the previous comparisons do not yield
+                # Finally, runs the actual comparison. Can only be called if the previous comparisons do not yield
                 # an answer (otherwise we get indexing exceptions)
                 compare_len = self.bad_word_seqs_len[bad_word_seq_number] - 1
                 return tf.cond(
@@ -512,7 +512,7 @@ class TFSuppressTokensAtBeginLogitsProcessor(TFLogitsProcessor):
     r"""
     [`TFSuppressTokensAtBeginLogitsProcessor`] suppresses a list of tokens as soon as the `generate` function starts
     generating using `begin_index` tokens. This should ensure that the tokens defined by `begin_suppress_tokens` at not
-    sampled at the begining of the generation.
+    sampled at the beginning of the generation.
     """
 
     def __init__(self, begin_suppress_tokens, begin_index):
@@ -520,15 +520,21 @@ class TFSuppressTokensAtBeginLogitsProcessor(TFLogitsProcessor):
         self.begin_index = begin_index
 
     def __call__(self, input_ids: tf.Tensor, scores: tf.Tensor, cur_len: int) -> tf.Tensor:
-        scores = tf.cond(
-            tf.equal(cur_len, self.begin_index),
-            lambda: tf.tensor_scatter_nd_update(
-                scores,
-                indices=[[i, token] for i in range(scores.shape[0]) for token in self.begin_suppress_tokens],
-                updates=[-float("inf") for _ in range(scores.shape[0] * len(self.begin_suppress_tokens))],
-            ),
-            lambda: scores,
-        )
+        suppressed_indices = []
+        for token in self.begin_suppress_tokens:
+            if token < scores.shape[-1]:  # to ensure we don't go beyond the vocab size
+                suppressed_indices.extend([[i, token] for i in range(scores.shape[0])])
+
+        if len(suppressed_indices) > 0:
+            scores = tf.cond(
+                tf.equal(cur_len, self.begin_index),
+                lambda: tf.tensor_scatter_nd_update(
+                    scores,
+                    indices=suppressed_indices,
+                    updates=[-float("inf") for _ in range(scores.shape[0] * len(self.begin_suppress_tokens))],
+                ),
+                lambda: scores,
+            )
         return scores
 
 
@@ -540,11 +546,17 @@ class TFSuppressTokensLogitsProcessor(TFLogitsProcessor):
         self.suppress_tokens = list(suppress_tokens)
 
     def __call__(self, input_ids: tf.Tensor, scores: tf.Tensor, cur_len: int) -> tf.Tensor:
-        scores = tf.tensor_scatter_nd_update(
-            scores,
-            indices=[[i, token] for i in range(scores.shape[0]) for token in self.suppress_tokens],
-            updates=[-float("inf") for _ in range(scores.shape[0] * len(self.suppress_tokens))],
-        )
+        suppressed_indices = []
+        for token in self.suppress_tokens:
+            if token < scores.shape[-1]:  # to ensure we don't go beyond the vocab size
+                suppressed_indices.extend([[i, token] for i in range(scores.shape[0])])
+
+        if len(suppressed_indices) > 0:
+            scores = tf.tensor_scatter_nd_update(
+                scores,
+                indices=[[i, token] for i in range(scores.shape[0]) for token in self.suppress_tokens],
+                updates=[-float("inf") for _ in range(scores.shape[0] * len(self.suppress_tokens))],
+            )
         return scores
 
 
@@ -569,7 +581,7 @@ class TFForceTokensLogitsProcessor(TFLogitsProcessor):
             batch_size = scores.shape[0]
             current_token = self.force_token_array[generation_idx]
 
-            new_scores = tf.ones_like(scores, dtype=scores.dtype) * -float("inf")
+            new_scores = tf.zeros_like(scores, dtype=scores.dtype) + tf.constant([scores.dtype.min])
             indices = tf.stack((tf.range(batch_size), tf.tile([current_token], [batch_size])), axis=1)
             updates = tf.zeros((batch_size,), dtype=scores.dtype)
             new_scores = tf.tensor_scatter_nd_update(new_scores, indices, updates)

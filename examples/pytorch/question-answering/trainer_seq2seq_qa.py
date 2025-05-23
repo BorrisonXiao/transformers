@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 The HuggingFace Team All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,17 +14,18 @@
 """
 A subclass of `Trainer` specific to Question-Answering tasks
 """
+
 import math
 import time
-from typing import Dict, List, Optional
+from typing import Optional
 
 from torch.utils.data import Dataset
 
-from transformers import Seq2SeqTrainer, is_torch_tpu_available
+from transformers import Seq2SeqTrainer, is_torch_xla_available
 from transformers.trainer_utils import PredictionOutput, speed_metrics
 
 
-if is_torch_tpu_available(check_device=False):
+if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
     import torch_xla.debug.metrics as met
 
@@ -41,17 +41,18 @@ class QuestionAnsweringSeq2SeqTrainer(Seq2SeqTrainer):
         self,
         eval_dataset: Optional[Dataset] = None,
         eval_examples=None,
-        ignore_keys: Optional[List[str]] = None,
+        ignore_keys: Optional[list[str]] = None,
         metric_key_prefix: str = "eval",
         **gen_kwargs,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         gen_kwargs = gen_kwargs.copy()
-        gen_kwargs["max_length"] = (
-            gen_kwargs["max_length"] if gen_kwargs.get("max_length") is not None else self.args.generation_max_length
-        )
-        gen_kwargs["num_beams"] = (
-            gen_kwargs["num_beams"] if gen_kwargs.get("num_beams") is not None else self.args.generation_num_beams
-        )
+
+        # Use legacy argument setting if a) the option is not explicitly passed; and b) the argument is set in the
+        # training args
+        if gen_kwargs.get("max_length") is None and self.args.generation_max_length is not None:
+            gen_kwargs["max_length"] = self.args.generation_max_length
+        if gen_kwargs.get("num_beams") is None and self.args.generation_num_beams is not None:
+            gen_kwargs["num_beams"] = self.args.generation_num_beams
         self._gen_kwargs = gen_kwargs
 
         eval_dataset = self.eval_dataset if eval_dataset is None else eval_dataset

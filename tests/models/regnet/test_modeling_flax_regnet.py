@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,10 +32,10 @@ if is_flax_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoFeatureExtractor
+    from transformers import AutoImageProcessor
 
 
-class FlaxRegNetModelTester(unittest.TestCase):
+class FlaxRegNetModelTester:
     def __init__(
         self,
         parent,
@@ -215,16 +214,16 @@ def prepare_img():
 @require_flax
 class FlaxRegNetModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return AutoFeatureExtractor.from_pretrained("facebook/regnet-y-040") if is_vision_available() else None
+    def default_image_processor(self):
+        return AutoImageProcessor.from_pretrained("facebook/regnet-y-040") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = FlaxRegNetForImageClassification.from_pretrained("facebook/regnet-y-040")
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="np")
+        inputs = image_processor(images=image, return_tensors="np")
 
         outputs = model(**inputs)
 
