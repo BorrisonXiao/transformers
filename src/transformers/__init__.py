@@ -752,6 +752,12 @@ _import_structure = {
         "SpeechT5HifiGanConfig",
         "SpeechT5Processor",
     ],
+    "models.speechmult5": [
+        "SpeechMult5Config",
+        "SpeechMult5FeatureExtractor",
+        "SpeechMult5HifiGanConfig",
+        "SpeechMult5Processor",
+    ],
     "models.splinter": [
         "SplinterConfig",
         "SplinterTokenizer",
@@ -1032,6 +1038,7 @@ else:
     _import_structure["models.siglip"].append("SiglipTokenizer")
     _import_structure["models.speech_to_text"].append("Speech2TextTokenizer")
     _import_structure["models.speecht5"].append("SpeechT5Tokenizer")
+    _import_structure["models.speechmult5"].append("SpeechMult5Tokenizer")
     _import_structure["models.t5"].append("T5Tokenizer")
     _import_structure["models.udop"].append("UdopTokenizer")
     _import_structure["models.xglm"].append("XGLMTokenizer")
@@ -3386,6 +3393,16 @@ else:
             "SpeechT5PreTrainedModel",
         ]
     )
+    _import_structure["models.speechmult5"].extend(
+        [
+            "SpeechMult5ForSpeechToSpeech",
+            "SpeechMult5ForSpeechToText",
+            "SpeechMult5ForTextToSpeech",
+            "SpeechMult5HifiGan",
+            "SpeechMult5Model",
+            "SpeechMult5PreTrainedModel",
+        ]
+    )
     _import_structure["models.splinter"].extend(
         [
             "SplinterForPreTraining",
@@ -5677,6 +5694,12 @@ if TYPE_CHECKING:
         SpeechT5HifiGanConfig,
         SpeechT5Processor,
     )
+    from .models.speechmult5 import (
+        SpeechMult5Config,
+        SpeechMult5FeatureExtractor,
+        SpeechMult5HifiGanConfig,
+        SpeechMult5Processor,
+    )
     from .models.splinter import (
         SplinterConfig,
         SplinterTokenizer,
@@ -7905,6 +7928,14 @@ if TYPE_CHECKING:
             SpeechT5HifiGan,
             SpeechT5Model,
             SpeechT5PreTrainedModel,
+        )
+        from .models.speechmult5 import (
+            SpeechMult5ForSpeechToSpeech,
+            SpeechMult5ForSpeechToText,
+            SpeechMult5ForTextToSpeech,
+            SpeechMult5HifiGan,
+            SpeechMult5Model,
+            SpeechMult5PreTrainedModel,
         )
         from .models.splinter import (
             SplinterForPreTraining,

@@ -237,6 +237,7 @@ MODEL_MAPPING_NAMES = OrderedDict(
         ("siglip_vision_model", "SiglipVisionModel"),
         ("speech_to_text", "Speech2TextModel"),
         ("speecht5", "SpeechT5Model"),
+        ("speechmult5", "SpeechMult5Model"),
         ("splinter", "SplinterModel"),
         ("squeezebert", "SqueezeBertModel"),
         ("stablelm", "StableLmModel"),
@@ -915,6 +916,7 @@ MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES = OrderedDict(
         ("speech-encoder-decoder", "SpeechEncoderDecoderModel"),
         ("speech_to_text", "Speech2TextForConditionalGeneration"),
         ("speecht5", "SpeechT5ForSpeechToText"),
+        ("speechmult5", "SpeechMult5ForSpeechToText"),
         ("whisper", "WhisperForConditionalGeneration"),
     ]
 )
@@ -1311,6 +1313,7 @@ MODEL_FOR_TEXT_TO_SPECTROGRAM_MAPPING_NAMES = OrderedDict(
         # Model for Text-To-Spectrogram mapping
         ("fastspeech2_conformer", "FastSpeech2ConformerModel"),
         ("speecht5", "SpeechT5ForTextToSpeech"),
+        ("speechmult5", "SpeechMult5ForTextToSpeech"),
     ]
 )
 
