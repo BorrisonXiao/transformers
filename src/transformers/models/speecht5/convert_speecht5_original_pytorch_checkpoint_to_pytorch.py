@@ -151,12 +151,30 @@ IGNORE_KEYS_S2S = IGNORE_KEYS + [
 ]
 
 
+def _get_parametrized_weight(hf_pointer, weight_type):
+    if not hasattr(hf_pointer, "parametrizations"):
+        return None
+    if not hasattr(hf_pointer.parametrizations, "weight"):
+        return None
+    if weight_type == "weight_g":
+        return hf_pointer.parametrizations.weight.original0
+    if weight_type == "weight_v":
+        return hf_pointer.parametrizations.weight.original1
+    return None
+
+
 def set_recursively(hf_pointer, key, value, full_name, weight_type):
     for attribute in key.split("."):
         hf_pointer = getattr(hf_pointer, attribute)
 
     if weight_type is not None:
-        hf_shape = getattr(hf_pointer, weight_type).shape
+        try:
+            hf_shape = getattr(hf_pointer, weight_type).shape
+        except AttributeError:
+            parametrized = _get_parametrized_weight(hf_pointer, weight_type)
+            if parametrized is None:
+                raise
+            hf_shape = parametrized.shape
     else:
         hf_shape = hf_pointer.shape
 
@@ -169,9 +187,15 @@ def set_recursively(hf_pointer, key, value, full_name, weight_type):
     if weight_type == "weight":
         hf_pointer.weight.data = value
     elif weight_type == "weight_g":
-        hf_pointer.weight_g.data = value
+        if hasattr(hf_pointer, "weight_g"):
+            hf_pointer.weight_g.data = value
+        else:
+            _get_parametrized_weight(hf_pointer, weight_type).data = value
     elif weight_type == "weight_v":
-        hf_pointer.weight_v.data = value
+        if hasattr(hf_pointer, "weight_v"):
+            hf_pointer.weight_v.data = value
+        else:
+            _get_parametrized_weight(hf_pointer, weight_type).data = value
     elif weight_type == "bias":
         hf_pointer.bias.data = value
     elif weight_type == "running_mean":

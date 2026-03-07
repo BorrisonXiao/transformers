@@ -14,6 +14,7 @@
 # limitations under the License.
 """PyTorch SpeechMult5 model."""
 
+from dataclasses import dataclass
 import math
 from typing import List, Optional, Tuple, Union
 
@@ -21,6 +22,7 @@ import numpy as np
 import torch
 import torch.utils.checkpoint
 from torch import nn
+import torch.nn.functional as F
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, L1Loss
 
 from ...activations import ACT2FN
@@ -39,6 +41,7 @@ from ...modeling_outputs import (
 )
 from ...modeling_utils import PreTrainedModel
 from ...utils import (
+    ModelOutput,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
     logging,
@@ -54,6 +57,35 @@ _HIDDEN_STATES_START_POSITION = 1
 
 # General docstring
 _CONFIG_FOR_DOC = "SpeechMult5Config"
+
+
+@dataclass
+class SpeechMult5SpeechToTextOutput(Seq2SeqLMOutput):
+    """
+    Output type of [`SpeechMult5ForSpeechToText`].
+
+    Args:
+        ctc_logits (`torch.FloatTensor`, *optional*):
+            Encoder-side CTC logits of shape `(batch_size, ctc_sequence_length, ctc_vocab_size)`.
+        ce_loss (`torch.FloatTensor`, *optional*):
+            Autoregressive decoder cross-entropy loss component.
+        ctc_loss (`torch.FloatTensor`, *optional*):
+            Encoder-side CTC loss component.
+        encoder_ctc_lengths (`torch.LongTensor`, *optional*):
+            Effective encoder lengths used for CTC (after sync trimming if enabled).
+    """
+    ctc_logits: Optional[torch.FloatTensor] = None
+    ce_loss: Optional[torch.FloatTensor] = None
+    ctc_loss: Optional[torch.FloatTensor] = None
+    encoder_ctc_lengths: Optional[torch.LongTensor] = None
+
+
+@dataclass
+class SpeechMult5CtcGenerationOutput(ModelOutput):
+    sequences: torch.LongTensor = None
+    ctc_logits: Optional[torch.FloatTensor] = None
+    input_lengths: Optional[torch.LongTensor] = None
+    cross_attentions: Optional[Tuple] = None
 
 
 # Copied from transformers.models.bart.modeling_bart.shift_tokens_right
@@ -301,6 +333,181 @@ def _prepend_prefix_attention_mask(
         device=device,
     )
     return torch.cat([prefix_mask, decoder_attention_mask], dim=1)
+
+
+def _resolve_ctc_blank_token_id(
+    config: SpeechMult5Config,
+    ctc_blank_token_id: Optional[int] = None,
+) -> int:
+    if ctc_blank_token_id is not None:
+        return int(ctc_blank_token_id)
+    config_blank = getattr(config, "ctc_blank_token_id", None)
+    if config_blank is not None:
+        return int(config_blank)
+    raise ValueError(
+        "CTC blank token ID is not set. Set `config.ctc_blank_token_id` or pass `ctc_blank_token_id=`."
+    )
+
+
+def _trim_sync_positions_for_ctc(
+    config: SpeechMult5Config,
+    encoder_hidden_states: torch.FloatTensor,
+    encoder_attention_mask: Optional[torch.LongTensor],
+) -> Tuple[torch.FloatTensor, Optional[torch.LongTensor]]:
+    sync_matrix_len = int(getattr(config, "sync_matrix_len", 0) or 0)
+    if not getattr(config, "sync_trim_for_ctc", True) or sync_matrix_len <= 0:
+        return encoder_hidden_states, encoder_attention_mask
+
+    if encoder_hidden_states.shape[1] <= sync_matrix_len:
+        # Degenerate case: avoid empty sequence; return zero-length-safe slice.
+        trimmed_hidden = encoder_hidden_states[:, :0, :]
+        trimmed_mask = (
+            encoder_attention_mask[:, :0] if encoder_attention_mask is not None else None
+        )
+        return trimmed_hidden, trimmed_mask
+
+    trimmed_hidden = encoder_hidden_states[:, sync_matrix_len:, :]
+    trimmed_mask = (
+        encoder_attention_mask[:, sync_matrix_len:]
+        if encoder_attention_mask is not None
+        else None
+    )
+    return trimmed_hidden, trimmed_mask
+
+
+def _encoder_attention_mask_to_lengths(
+    encoder_hidden_states: torch.FloatTensor,
+    encoder_attention_mask: Optional[torch.LongTensor],
+) -> torch.LongTensor:
+    if encoder_attention_mask is None:
+        return torch.full(
+            (encoder_hidden_states.shape[0],),
+            encoder_hidden_states.shape[1],
+            dtype=torch.long,
+            device=encoder_hidden_states.device,
+        )
+    return encoder_attention_mask.long().sum(dim=-1)
+
+
+def _ctc_greedy_collapse(
+    ctc_logits: torch.FloatTensor,
+    input_lengths: torch.LongTensor,
+    *,
+    blank_token_id: int,
+    pad_token_id: Optional[int],
+    eos_token_id: Optional[int],
+) -> torch.LongTensor:
+    # logits: (B, T, C)
+    pred_ids = torch.argmax(ctc_logits, dim=-1)  # (B, T)
+    decoded: List[List[int]] = []
+
+    for b in range(pred_ids.shape[0]):
+        seq = pred_ids[b, : int(input_lengths[b].item())].detach().cpu().tolist()
+        collapsed: List[int] = []
+        prev = None
+        for tok in seq:
+            tok = int(tok)
+            if prev is not None and tok == prev:
+                continue
+            prev = tok
+            if tok == blank_token_id:
+                continue
+            if pad_token_id is not None and tok == int(pad_token_id):
+                continue
+            collapsed.append(tok)
+        if eos_token_id is not None:
+            collapsed.append(int(eos_token_id))
+        decoded.append(collapsed)
+
+    max_len = max((len(x) for x in decoded), default=1)
+    pad_value = int(pad_token_id) if pad_token_id is not None else 0
+    out = torch.full(
+        (len(decoded), max_len),
+        pad_value,
+        dtype=torch.long,
+        device=ctc_logits.device,
+    )
+    for i, seq in enumerate(decoded):
+        if seq:
+            out[i, : len(seq)] = torch.tensor(seq, dtype=torch.long, device=out.device)
+    return out
+
+
+def _compute_sync_info_mass_from_cross_attentions(
+    *,
+    cross_attentions: Optional[Tuple[torch.FloatTensor, ...]],
+    encoder_attention_mask_without_sync: Optional[torch.LongTensor],
+    output_token_mask: Optional[torch.BoolTensor],
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute TTS-style logging diagnostics for decoder cross-attention:
+    - sync_mass: mean probability mass placed on sync-prefix encoder positions
+    - info_mass: mean probability mass placed on non-sync/content encoder positions
+
+    `encoder_attention_mask_without_sync` is the content-only encoder mask (sync rows removed).
+    The sync span length is inferred from the cross-attention source length delta.
+    """
+    device = None
+    if cross_attentions is not None and len(cross_attentions) > 0 and cross_attentions[0] is not None:
+        device = cross_attentions[0].device
+    elif output_token_mask is not None:
+        device = output_token_mask.device
+    elif encoder_attention_mask_without_sync is not None:
+        device = encoder_attention_mask_without_sync.device
+    else:
+        device = torch.device("cpu")
+
+    zero = torch.tensor(0.0, device=device)
+    if cross_attentions is None or len(cross_attentions) == 0:
+        return zero, zero
+    if encoder_attention_mask_without_sync is None or output_token_mask is None:
+        return zero, zero
+
+    valid_layers = [x for x in cross_attentions if x is not None]
+    if len(valid_layers) == 0:
+        return zero, zero
+
+    try:
+        attn = torch.cat(valid_layers, dim=1)  # (batch, layers*heads, tgt_len, src_len)
+    except Exception:
+        return zero, zero
+
+    if attn.ndim != 4:
+        return zero, zero
+
+    # Align target-axis mask length to attention target length.
+    output_masks = output_token_mask.to(device=attn.device, dtype=torch.bool)
+    tgt_len = attn.shape[2]
+    if output_masks.shape[1] > tgt_len:
+        output_masks = output_masks[:, :tgt_len]
+    elif output_masks.shape[1] < tgt_len:
+        pad = torch.zeros(
+            (output_masks.shape[0], tgt_len - output_masks.shape[1]),
+            dtype=torch.bool,
+            device=output_masks.device,
+        )
+        output_masks = torch.cat([output_masks, pad], dim=1)
+
+    if not torch.any(output_masks):
+        return zero, zero
+
+    content_mask = encoder_attention_mask_without_sync.to(device=attn.device, dtype=torch.bool)
+    diff = attn.shape[-1] - content_mask.shape[-1]
+    if diff <= 0:
+        # No sync prefix positions present in attention source axis.
+        return zero, zero
+
+    sync_attentions = attn[:, :, :, :diff]
+    sync_mass = sync_attentions.sum(dim=-1)  # (batch, heads, out_len)
+    sync_mass = sync_mass.masked_select(output_masks.unsqueeze(1))
+    sync_mass_mean = torch.mean(sync_mass) if sync_mass.numel() > 0 else zero
+
+    text_attentions = attn[:, :, :, diff:]
+    text_mass = text_attentions.sum(dim=-1)
+    text_mass = text_mass.masked_select(output_masks.unsqueeze(1))
+    info_mass_mean = torch.mean(text_mass) if text_mass.numel() > 0 else zero
+
+    return sync_mass_mean, info_mass_mean
 
 
 # Copied from transformers.models.wav2vec2.modeling_wav2vec2._compute_mask_indices
@@ -819,6 +1026,26 @@ class SpeechMult5SpeechEncoderPrenet(nn.Module):
             attention_mask=attention_mask,
         )
 
+        # Keep the speech sequence within the fixed sinusoidal positional capacity to avoid
+        # runtime positional table growth and checkpoint-shape drift.
+        max_pos_len = int(self.pos_sinusoidal_embed.weights.shape[0]) - int(self.pos_sinusoidal_embed.padding_idx) - 1
+        if max_pos_len > 0 and hidden_states.shape[1] > max_pos_len:
+            if hasattr(logger, "warning_once"):
+                logger.warning_once(
+                    "Truncating speech encoder features from length %d to %d (max positional capacity).",
+                    hidden_states.shape[1],
+                    max_pos_len,
+                )
+            else:
+                logger.warning(
+                    "Truncating speech encoder features from length %d to %d (max positional capacity).",
+                    hidden_states.shape[1],
+                    max_pos_len,
+                )
+            hidden_states = hidden_states[:, :max_pos_len, :]
+            if attention_mask is not None:
+                attention_mask = attention_mask[:, :max_pos_len]
+
         positional_conv_embedding = self.pos_conv_embed(hidden_states)
         hidden_states = hidden_states + positional_conv_embedding
 
@@ -844,6 +1071,7 @@ class SpeechMult5SpeechEncoderPrenet(nn.Module):
         output_lengths = self._get_feat_extract_output_lengths(non_padded_lengths).to(
             torch.long
         )
+        output_lengths = output_lengths.clamp(max=feature_vector_length)
         batch_size = attention_mask.shape[0]
 
         attention_mask = torch.zeros(
@@ -852,12 +1080,14 @@ class SpeechMult5SpeechEncoderPrenet(nn.Module):
             device=attention_mask.device,
         )
         # these two operations makes sure that all values before the output lengths idxs are attended to
-        attention_mask[
-            (
-                torch.arange(attention_mask.shape[0], device=attention_mask.device),
-                output_lengths - 1,
-            )
-        ] = 1
+        valid = output_lengths > 0
+        if valid.any():
+            attention_mask[
+                (
+                    torch.arange(attention_mask.shape[0], device=attention_mask.device)[valid],
+                    output_lengths[valid] - 1,
+                )
+            ] = 1
         attention_mask = attention_mask.flip([-1]).cumsum(-1).flip([-1]).bool()
         return attention_mask
 
@@ -1171,6 +1401,21 @@ class SpeechMult5TextDecoderPostnet(nn.Module):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
+
+
+class SpeechMult5EncoderCtcHead(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        ctc_vocab_size = (
+            int(config.ctc_vocab_size)
+            if getattr(config, "ctc_vocab_size", None) is not None
+            else int(config.vocab_size)
+        )
+        self.proj = nn.Linear(config.hidden_size, ctc_vocab_size, bias=False)
+
+    def forward(self, hidden_states: torch.Tensor):
+        return self.proj(hidden_states)
 
 
 class SpeechMult5Attention(nn.Module):
@@ -2383,8 +2628,12 @@ class SpeechMult5GuidedMultiheadAttentionLoss(nn.Module):
         super().__init__()
         self.sigma = config.guided_attention_loss_sigma
         self.scale = config.guided_attention_loss_scale
-        self.sync_target = getattr(config, "guided_attention_sync_target", 0.0)
-        self.sync_tolerance = getattr(config, "guided_attention_sync_tolerance", 0.0)
+        self.sync_cap = getattr(config, "guided_attention_sync_cap", None)
+        if self.sync_cap is None:
+            self.sync_cap = getattr(config, "guided_attention_sync_target", 0.0)
+        self.sync_lowerbound = float(
+            getattr(config, "guided_attention_sync_lowerbound", 0.0) or 0.0
+        )
         self.sync_balance_scale = getattr(
             config, "guided_attention_sync_balance_scale", 1.0
         )
@@ -2430,11 +2679,9 @@ class SpeechMult5GuidedMultiheadAttentionLoss(nn.Module):
             # Mask valid output frames
             sync_mass = sync_mass.masked_select(output_masks.unsqueeze(1))
             sync_mass_mean = torch.mean(sync_mass)
-            sync_deviation = (
-                torch.abs(sync_mass - self.sync_target) - self.sync_tolerance
-            )
-            sync_deviation = torch.clamp(sync_deviation, min=0.0)
-            sync_balance_penalty = torch.mean(sync_deviation)
+            sync_excess = torch.clamp(sync_mass - float(self.sync_cap), min=0.0)
+            sync_deficit = torch.clamp(float(self.sync_lowerbound) - sync_mass, min=0.0)
+            sync_balance_penalty = torch.mean(sync_excess + sync_deficit)
 
             # 2. Normalized GAL: Enforce strictly monotonic text alignment
             text_attentions = attentions[:, :, :, diff:]
@@ -2962,9 +3209,11 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
         self.speechmult5 = SpeechMult5Model(config, speech_encoder, text_decoder)
 
         self.text_decoder_postnet = SpeechMult5TextDecoderPostnet(config)
+        self.ctc_head = SpeechMult5EncoderCtcHead(config)
 
         # Initialize weights and apply final processing
         self.post_init()
+        self._tie_ctc_head_if_needed()
 
     def get_encoder(self):
         return self.speechmult5.get_encoder()
@@ -2984,10 +3233,92 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.text_decoder_postnet.set_output_embeddings(new_embeddings)
+        self._tie_ctc_head_if_needed()
+
+    def _tie_ctc_head_if_needed(self):
+        if not getattr(self.config, "ctc_share_decoder_embed", False):
+            return
+        ctc_vocab_size = (
+            int(self.config.ctc_vocab_size)
+            if getattr(self.config, "ctc_vocab_size", None) is not None
+            else int(self.config.vocab_size)
+        )
+        if ctc_vocab_size != int(self.config.vocab_size):
+            raise ValueError(
+                "`ctc_share_decoder_embed=True` requires `ctc_vocab_size == vocab_size`."
+            )
+        decoder_embed = self.speechmult5.decoder.prenet.get_input_embeddings().weight
+        if self.ctc_head.proj.weight.shape != decoder_embed.shape:
+            raise ValueError(
+                "CTC head and decoder embedding shapes do not match for weight tying: "
+                f"{tuple(self.ctc_head.proj.weight.shape)} vs {tuple(decoder_embed.shape)}"
+            )
+        self.ctc_head.proj.weight = decoder_embed
+
+    def _compute_ctc_logits_and_lengths(
+        self,
+        encoder_last_hidden_state: torch.FloatTensor,
+        attention_mask: Optional[torch.LongTensor],
+    ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
+        encoder_attention_mask = _prepare_encoder_attention_mask_for_decoder(
+            self.speechmult5,
+            encoder_last_hidden_state,
+            attention_mask,
+            apply_sync_dropout=False,
+        )
+        ctc_hidden_states, ctc_attention_mask = _trim_sync_positions_for_ctc(
+            self.config, encoder_last_hidden_state, encoder_attention_mask
+        )
+        ctc_logits = self.ctc_head(ctc_hidden_states)
+        ctc_input_lengths = _encoder_attention_mask_to_lengths(
+            ctc_hidden_states, ctc_attention_mask
+        )
+        return ctc_logits, ctc_input_lengths
+
+    def _compute_content_encoder_attention_mask(
+        self,
+        encoder_last_hidden_state: torch.FloatTensor,
+        attention_mask: Optional[torch.LongTensor],
+    ) -> Optional[torch.LongTensor]:
+        encoder_attention_mask = _prepare_encoder_attention_mask_for_decoder(
+            self.speechmult5,
+            encoder_last_hidden_state,
+            attention_mask,
+            apply_sync_dropout=False,
+        )
+        _, content_attention_mask = _trim_sync_positions_for_ctc(
+            self.config, encoder_last_hidden_state, encoder_attention_mask
+        )
+        return content_attention_mask
+
+    def get_normalized_probs_for_ctc(
+        self, ctc_logits: torch.FloatTensor, log_probs: bool = True
+    ) -> torch.FloatTensor:
+        if log_probs:
+            return F.log_softmax(ctc_logits.float(), dim=-1)
+        return F.softmax(ctc_logits.float(), dim=-1)
+
+    def ctc_greedy_decode(
+        self,
+        ctc_logits: torch.FloatTensor,
+        input_lengths: torch.LongTensor,
+        *,
+        ctc_blank_token_id: Optional[int] = None,
+    ) -> torch.LongTensor:
+        blank_id = _resolve_ctc_blank_token_id(
+            self.config, ctc_blank_token_id=ctc_blank_token_id
+        )
+        return _ctc_greedy_collapse(
+            ctc_logits,
+            input_lengths,
+            blank_token_id=blank_id,
+            pad_token_id=self.config.pad_token_id,
+            eos_token_id=self.config.eos_token_id,
+        )
 
     @add_start_docstrings_to_model_forward(SPEECHT5_INPUTS_DOCSTRING)
     @replace_return_docstrings(
-        output_type=Seq2SeqLMOutput, config_class=_CONFIG_FOR_DOC
+        output_type=SpeechMult5SpeechToTextOutput, config_class=_CONFIG_FOR_DOC
     )
     def forward(
         self,
@@ -3006,7 +3337,11 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
         return_dict: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
         decoder_prefix_ids: Optional[Union[List[int], torch.LongTensor]] = None,
-    ) -> Union[Tuple, Seq2SeqLMOutput]:
+        ctc_labels: Optional[torch.LongTensor] = None,
+        ce_weight: Optional[float] = None,
+        ctc_weight: Optional[float] = None,
+        output_ctc_logits: Optional[bool] = None,
+    ) -> Union[Tuple, SpeechMult5SpeechToTextOutput]:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, sequence_length)`):
             Float values of input raw speech waveform. Values can be obtained by loading a *.flac* or *.wav* audio file
@@ -3073,8 +3408,12 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
+        ce_weight = 1.0 if ce_weight is None else float(ce_weight)
+        ctc_weight = 0.0 if ctc_weight is None else float(ctc_weight)
+        want_ctc_logits = bool(output_ctc_logits) or ctc_weight > 0.0
 
         labels_for_loss = labels
+        labels_for_ctc = ctc_labels if ctc_labels is not None else labels
         if labels is not None:
             if decoder_input_ids is None:
                 prefix_ids = _resolve_runtime_decoder_prefix_ids(
@@ -3097,6 +3436,30 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
                     self.config.decoder_start_token_id,
                 )
 
+        if decoder_input_ids is None and (ctc_weight > 0.0 or want_ctc_logits):
+            batch_size = None
+            device = None
+            if input_values is not None:
+                batch_size = input_values.shape[0]
+                device = input_values.device
+            elif attention_mask is not None:
+                batch_size = attention_mask.shape[0]
+                device = attention_mask.device
+            elif encoder_outputs is not None:
+                enc0 = encoder_outputs[0] if isinstance(encoder_outputs, tuple) else encoder_outputs.last_hidden_state
+                batch_size = enc0.shape[0]
+                device = enc0.device
+            if batch_size is None:
+                raise ValueError(
+                    "Unable to infer batch size for CTC-only forward path. Provide `input_values` or `encoder_outputs`."
+                )
+            decoder_input_ids = torch.full(
+                (batch_size, 1),
+                int(self.config.decoder_start_token_id),
+                dtype=torch.long,
+                device=device,
+            )
+
         outputs = self.speechmult5(
             input_values=input_values,
             attention_mask=attention_mask,
@@ -3115,23 +3478,102 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
 
         logits = self.text_decoder_postnet(outputs[0])
 
+        ctc_logits = None
+        ctc_input_lengths = None
+        if want_ctc_logits:
+            ctc_logits, ctc_input_lengths = self._compute_ctc_logits_and_lengths(
+                outputs.encoder_last_hidden_state,
+                attention_mask,
+            )
+
         loss = None
-        loss_dict = None
-        if labels is not None:
+        loss_dict: Optional[dict] = None
+        ce_loss = None
+        ctc_loss = None
+        if labels is not None and ce_weight > 0.0:
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(
+            ce_loss = loss_fct(
                 logits.view(-1, self.config.vocab_size), labels_for_loss.view(-1)
             )
-            loss_dict = {
-                "ce_loss": loss.item() if isinstance(loss, torch.Tensor) else loss,
-            }
+
+        if ctc_weight > 0.0:
+            if labels_for_ctc is None:
+                raise ValueError(
+                    "`ctc_weight > 0` requires `labels` or `ctc_labels` to compute CTC loss."
+                )
+            if ctc_logits is None or ctc_input_lengths is None:
+                ctc_logits, ctc_input_lengths = self._compute_ctc_logits_and_lengths(
+                    outputs.encoder_last_hidden_state,
+                    attention_mask,
+                )
+
+            blank_id = _resolve_ctc_blank_token_id(self.config)
+            ctc_targets_source = labels_for_ctc
+            ctc_target_mask = ctc_targets_source.ne(-100)
+            if self.config.eos_token_id is not None:
+                ctc_target_mask = ctc_target_mask & ctc_targets_source.ne(self.config.eos_token_id)
+            target_lengths = ctc_target_mask.long().sum(dim=-1)
+            targets_flat = ctc_targets_source.masked_select(ctc_target_mask)
+            ctc_log_probs = (
+                self.get_normalized_probs_for_ctc(ctc_logits, log_probs=True)
+                .transpose(0, 1)
+                .contiguous()
+            )
+
+            with torch.backends.cudnn.flags(enabled=False):
+                ctc_loss = F.ctc_loss(
+                    ctc_log_probs,
+                    targets_flat,
+                    ctc_input_lengths.long(),
+                    target_lengths.long(),
+                    blank=blank_id,
+                    reduction="mean",
+                    zero_infinity=bool(getattr(self.config, "ctc_zero_infinity", True)),
+                )
+
+        if ce_loss is not None and ctc_loss is not None:
+            loss = (ce_weight * ce_loss) + (ctc_weight * ctc_loss)
+        elif ce_loss is not None:
+            loss = ce_weight * ce_loss
+        elif ctc_loss is not None:
+            loss = ctc_weight * ctc_loss
+
+        if (labels is not None or ctc_labels is not None) and ce_weight <= 0.0 and ctc_weight <= 0.0:
+            raise ValueError("At least one of `ce_weight` or `ctc_weight` must be > 0 when labels are provided.")
+
+        if ce_loss is not None or ctc_loss is not None:
+            loss_dict = {}
+            if ce_loss is not None:
+                loss_dict["ce_loss"] = float(ce_loss.detach().item())
+            if ctc_loss is not None:
+                loss_dict["ctc_loss"] = float(ctc_loss.detach().item())
+            if outputs.cross_attentions is not None and labels_for_loss is not None:
+                try:
+                    content_encoder_attention_mask = self._compute_content_encoder_attention_mask(
+                        outputs.encoder_last_hidden_state,
+                        attention_mask,
+                    )
+                    output_token_mask = labels_for_loss.ne(-100)
+                    sync_mass, info_mass = _compute_sync_info_mass_from_cross_attentions(
+                        cross_attentions=outputs.cross_attentions,
+                        encoder_attention_mask_without_sync=content_encoder_attention_mask,
+                        output_token_mask=output_token_mask,
+                    )
+                    loss_dict["sync_mass"] = float(sync_mass.detach().item())
+                    loss_dict["info_mass"] = float(info_mass.detach().item())
+                except Exception:
+                    pass
+            if loss is not None:
+                loss_dict["combined_loss"] = float(loss.detach().item())
             self._last_loss_dict = loss_dict
 
         if not return_dict:
             output = (logits,) + outputs[1:]
+            if ctc_logits is not None:
+                output = output + (ctc_logits,)
             return ((loss,) + output) if loss is not None else output
 
-        return Seq2SeqLMOutput(
+        return SpeechMult5SpeechToTextOutput(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
@@ -3141,6 +3583,10 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
             encoder_last_hidden_state=outputs.encoder_last_hidden_state,
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
+            ctc_logits=ctc_logits,
+            ce_loss=ce_loss,
+            ctc_loss=ctc_loss,
+            encoder_ctc_lengths=ctc_input_lengths,
         )
 
     def _prepare_decoder_input_ids_for_generation(
@@ -3260,6 +3706,77 @@ class SpeechMult5ForSpeechToText(SpeechMult5PreTrainedModel):
                 ),
             )
         return reordered_past
+
+    def generate_ctc(
+        self,
+        input_values: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
+        encoder_outputs: Optional[Union[BaseModelOutput, Tuple[Tuple[torch.FloatTensor]]]] = None,
+        return_dict_in_generate: bool = False,
+        output_ctc_logits: bool = False,
+        ctc_blank_token_id: Optional[int] = None,
+        **kwargs,
+    ) -> Union[torch.LongTensor, SpeechMult5CtcGenerationOutput]:
+        del kwargs  # Unused generation kwargs (e.g., max_length/num_beams) are intentionally ignored in CTC mode.
+
+        if input_values is None and encoder_outputs is None:
+            raise ValueError("`generate_ctc` requires `input_values` or `encoder_outputs`.")
+
+        if input_values is not None and input_values.ndim == 1:
+            input_values = input_values.unsqueeze(0)
+        if attention_mask is not None and attention_mask.ndim == 1:
+            attention_mask = attention_mask.unsqueeze(0)
+
+        if encoder_outputs is None:
+            encoder_outputs = self.speechmult5.encoder(
+                input_values=input_values,
+                attention_mask=attention_mask,
+                output_attentions=False,
+                output_hidden_states=False,
+                return_dict=True,
+            )
+        elif not isinstance(encoder_outputs, BaseModelOutput):
+            encoder_outputs = BaseModelOutput(
+                last_hidden_state=encoder_outputs[0],
+                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
+                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
+            )
+
+        ctc_logits, ctc_input_lengths = self._compute_ctc_logits_and_lengths(
+            encoder_outputs.last_hidden_state,
+            attention_mask,
+        )
+        sequences = self.ctc_greedy_decode(
+            ctc_logits,
+            ctc_input_lengths,
+            ctc_blank_token_id=ctc_blank_token_id,
+        )
+
+        if not return_dict_in_generate:
+            return sequences
+
+        return SpeechMult5CtcGenerationOutput(
+            sequences=sequences,
+            ctc_logits=ctc_logits if output_ctc_logits else None,
+            input_lengths=ctc_input_lengths,
+            cross_attentions=None,
+        )
+
+    def generate(self, *args, **kwargs):
+        asr_decoding_mode = kwargs.pop("asr_decoding_mode", None)
+        ctc_blank_token_id = kwargs.pop("ctc_blank_token_id", None)
+        if asr_decoding_mode is None:
+            asr_decoding_mode = getattr(self, "_asr_decoding_mode", "ar")
+
+        if asr_decoding_mode == "ar":
+            return super().generate(*args, **kwargs)
+        if asr_decoding_mode == "ctc":
+            if ctc_blank_token_id is not None:
+                kwargs["ctc_blank_token_id"] = ctc_blank_token_id
+            return self.generate_ctc(*args, **kwargs)
+        raise ValueError(
+            f"Unsupported ASR decoding mode: {asr_decoding_mode!r}. Expected 'ar' or 'ctc'."
+        )
 
 
 def _generate_speech(

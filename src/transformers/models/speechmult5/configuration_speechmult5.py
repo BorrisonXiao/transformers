@@ -168,9 +168,16 @@ class SpeechMult5Config(PretrainedConfig):
         guided_attention_loss_scale (`float`, *optional*, defaults to 10.0):
             Scaling coefficient for guided attention loss (also known as lambda).
         guided_attention_sync_target (`float`, *optional*, defaults to 0.0):
-            Target sync attention mass (after masking valid frames). Use `0.5` to encourage a 50/50 sync-text split.
+            Deprecated compatibility alias for `guided_attention_sync_cap`.
         guided_attention_sync_tolerance (`float`, *optional*, defaults to 0.0):
-            Dead-band around `guided_attention_sync_target` where no sync balance penalty is applied.
+            Deprecated. Kept only for checkpoint/config compatibility.
+        guided_attention_sync_cap (`float`, *optional*):
+            One-sided cap for sync attention mass (after masking valid frames). Sync mass above this value is
+            penalized; mass below or equal to this cap has no sync-balance penalty. If unset, the value of
+            `guided_attention_sync_target` is used for backward compatibility.
+        guided_attention_sync_lowerbound (`float`, *optional*, defaults to 0.0):
+            Lower bound for sync attention mass (after masking valid frames). Sync mass below this value is also
+            penalized as part of the sync-balance term.
         guided_attention_sync_balance_scale (`float`, *optional*, defaults to 1.0):
             Relative weight for the sync balance term inside the unscaled guided attention loss.
         guided_attention_text_scale (`float`, *optional*, defaults to 1.0):
@@ -182,6 +189,25 @@ class SpeechMult5Config(PretrainedConfig):
         default_decoder_prefix_ids (`List[int]`, *optional*):
             Optional generic decoder task-control token IDs used as a fallback prompt prefix during generation/training
             when task-specific methods support `decoder_prefix_ids` and no runtime override is provided.
+        ctc_vocab_size (`int`, *optional*):
+            Vocabulary size for the ASR encoder-side CTC head. Defaults to `vocab_size` when unset.
+        ctc_blank_token_id (`int`, *optional*):
+            Token ID to use as the CTC blank symbol (for `<ctc_blank>` if present in the tokenizer).
+        ctc_share_decoder_embed (`bool`, *optional*, defaults to `False`):
+            Whether to tie the CTC head weights to the text decoder token embedding matrix (fairseq-style
+            `share_ctc_embed`).
+        ctc_zero_infinity (`bool`, *optional*, defaults to `True`):
+            Whether to set infinite CTC losses (often caused by impossible alignments) to zero.
+        sync_trim_for_ctc (`bool`, *optional*, defaults to `True`):
+            Whether to remove sync-matrix positions from encoder outputs before computing CTC logits/loss.
+        alignment_loss_weight (`float`, *optional*, defaults to 0.0):
+            Scale factor for the auxiliary encoder-side speech/text alignment loss. A value of 0.0 disables it.
+        alignment_loss_type (`str`, *optional*, defaults to `"mse"`):
+            Alignment loss to apply on the encoder sync slice. Supported values are `"mse"`, `"smooth_l1"`,
+            `"cosine"`, and `"cka"`.
+        alignment_loss_scope (`str`, *optional*, defaults to `"none"`):
+            Which multitask batches should include the auxiliary alignment loss. Supported values are `"none"`,
+            `"asr"`, `"tts"`, and `"both"`.
 
     Example:
 
@@ -260,6 +286,8 @@ class SpeechMult5Config(PretrainedConfig):
         guided_attention_loss_scale=10.0,
         guided_attention_sync_target=0.0,
         guided_attention_sync_tolerance=0.0,
+        guided_attention_sync_cap=None,
+        guided_attention_sync_lowerbound=0.0,
         guided_attention_sync_balance_scale=1.0,
         guided_attention_text_scale=1.0,
         use_cache=True,
@@ -267,6 +295,14 @@ class SpeechMult5Config(PretrainedConfig):
         sync_matrix_len=512,
         sync_matrix_dropout=0.0,
         default_decoder_prefix_ids=None,
+        ctc_vocab_size=None,
+        ctc_blank_token_id=None,
+        ctc_share_decoder_embed=False,
+        ctc_zero_infinity=True,
+        sync_trim_for_ctc=True,
+        alignment_loss_weight=0.0,
+        alignment_loss_type="mse",
+        alignment_loss_scope="none",
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -342,6 +378,12 @@ class SpeechMult5Config(PretrainedConfig):
         self.guided_attention_loss_scale = guided_attention_loss_scale
         self.guided_attention_sync_target = guided_attention_sync_target
         self.guided_attention_sync_tolerance = guided_attention_sync_tolerance
+        self.guided_attention_sync_cap = (
+            guided_attention_sync_target
+            if guided_attention_sync_cap is None
+            else guided_attention_sync_cap
+        )
+        self.guided_attention_sync_lowerbound = guided_attention_sync_lowerbound
         self.guided_attention_sync_balance_scale = (
             guided_attention_sync_balance_scale
         )
@@ -356,6 +398,14 @@ class SpeechMult5Config(PretrainedConfig):
             if default_decoder_prefix_ids is not None
             else None
         )
+        self.ctc_vocab_size = ctc_vocab_size
+        self.ctc_blank_token_id = ctc_blank_token_id
+        self.ctc_share_decoder_embed = ctc_share_decoder_embed
+        self.ctc_zero_infinity = ctc_zero_infinity
+        self.sync_trim_for_ctc = sync_trim_for_ctc
+        self.alignment_loss_weight = alignment_loss_weight
+        self.alignment_loss_type = alignment_loss_type
+        self.alignment_loss_scope = alignment_loss_scope
 
         super().__init__(
             pad_token_id=pad_token_id,

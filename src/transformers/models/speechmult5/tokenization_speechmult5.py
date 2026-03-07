@@ -14,14 +14,17 @@
 # limitations under the License.
 """Tokenization class for SpeechMult5."""
 
+import json
 import os
 from shutil import copyfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import sentencepiece as spm
 
+from ...processing_utils import ProcessorMixin
 from ...tokenization_utils import PreTrainedTokenizer
 from ...utils import logging
+from ..wav2vec2.tokenization_wav2vec2 import Wav2Vec2CTCTokenizer
 from .number_normalizer import EnglishNumberNormalizer
 
 
@@ -216,3 +219,171 @@ class SpeechMult5Tokenizer(PreTrainedTokenizer):
                 fi.write(content_spiece_model)
 
         return (out_vocab_file,)
+
+
+class SpeechMult5CharTokenizer(Wav2Vec2CTCTokenizer):
+    """
+    Character tokenizer used by local SpeechMult5 fine-tuning checkpoints (`vocab.json`).
+
+    This tokenizer appends EOS in `build_inputs_with_special_tokens` to match SpeechMult5
+    seq2seq usage and defaults to SentencePiece-style whitespace marker `▁`.
+    """
+
+    def __init__(
+        self,
+        vocab_file,
+        bos_token="<s>",
+        eos_token="</s>",
+        unk_token="<unk>",
+        pad_token="<pad>",
+        word_delimiter_token="▁",
+        replace_word_delimiter_char=" ",
+        do_lower_case=False,
+        target_lang=None,
+        **kwargs,
+    ):
+        super().__init__(
+            vocab_file=vocab_file,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            unk_token=unk_token,
+            pad_token=pad_token,
+            word_delimiter_token=word_delimiter_token,
+            replace_word_delimiter_char=replace_word_delimiter_char,
+            do_lower_case=do_lower_case,
+            target_lang=target_lang,
+            **kwargs,
+        )
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *init_inputs, **kwargs):
+        # Delegate to HF loading logic (supports added_tokens.json).
+        tok = super().from_pretrained(pretrained_model_name_or_path, *init_inputs, **kwargs)
+        # Some legacy configs store `|` delimiter despite SP-style vocab.
+        try:
+            tok.word_delimiter_token = "▁"
+            tok.replace_word_delimiter_char = " "
+        except Exception:
+            pass
+        return tok
+
+    def build_inputs_with_special_tokens(self, token_ids_0, token_ids_1=None) -> List[int]:
+        if token_ids_1 is None:
+            return token_ids_0 + [self.eos_token_id]
+        return token_ids_0 + token_ids_1 + [self.eos_token_id]
+
+    def _load_added_tokens_json(self, tokenizer_path: str) -> None:
+        # Convenience helper used by local scripts/tests when a tokenizer is created directly.
+        path = os.path.join(tokenizer_path, "added_tokens.json")
+        if not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                added_tokens = json.load(f)
+            # from_pretrained already handles this, so direct-instantiation callers can opt-in.
+            self.add_tokens(list(added_tokens.keys()), special_tokens=True)
+        except Exception:
+            return
+
+
+class SpeechMult5CharProcessor(ProcessorMixin):
+    """
+    Lightweight processor pairing a feature extractor with `SpeechMult5CharTokenizer`.
+
+    This mirrors `SpeechMult5Processor` behavior while avoiding strict tokenizer-type checks,
+    which is useful for local character-vocab checkpoints.
+    """
+
+    attributes = ["feature_extractor", "tokenizer"]
+    feature_extractor_class = "SpeechT5FeatureExtractor"
+    tokenizer_class = "SpeechMult5CharTokenizer"
+
+    def __init__(self, feature_extractor, tokenizer):
+        self.feature_extractor = feature_extractor
+        self.tokenizer = tokenizer
+        self.current_processor = self.feature_extractor
+
+    def __call__(self, *args, **kwargs):
+        audio = kwargs.pop("audio", None)
+        text = kwargs.pop("text", None)
+        text_target = kwargs.pop("text_target", None)
+        audio_target = kwargs.pop("audio_target", None)
+        sampling_rate = kwargs.pop("sampling_rate", None)
+
+        if audio is not None and text is not None:
+            raise ValueError("Cannot process both `audio` and `text` inputs.")
+        if audio_target is not None and text_target is not None:
+            raise ValueError("Cannot process both `audio_target` and `text_target` inputs.")
+        if audio is None and audio_target is None and text is None and text_target is None:
+            raise ValueError("Provide one of `audio`, `audio_target`, `text`, `text_target`.")
+
+        if audio is not None:
+            inputs = self.feature_extractor(audio, *args, sampling_rate=sampling_rate, **kwargs)
+        elif text is not None:
+            inputs = self.tokenizer(text, **kwargs)
+        else:
+            inputs = None
+
+        if audio_target is not None:
+            targets = self.feature_extractor(audio_target=audio_target, *args, sampling_rate=sampling_rate, **kwargs)
+            labels = targets["input_values"]
+        elif text_target is not None:
+            targets = self.tokenizer(text_target, **kwargs)
+            labels = targets["input_ids"]
+        else:
+            targets = None
+
+        if inputs is None:
+            return targets
+        if targets is not None:
+            inputs["labels"] = labels
+            decoder_attention_mask = targets.get("attention_mask")
+            if decoder_attention_mask is not None:
+                inputs["decoder_attention_mask"] = decoder_attention_mask
+        return inputs
+
+    def pad(self, *args, **kwargs):
+        input_values = kwargs.pop("input_values", None)
+        input_ids = kwargs.pop("input_ids", None)
+        labels = kwargs.pop("labels", None)
+
+        if input_values is not None and input_ids is not None:
+            raise ValueError("Cannot process both `input_values` and `input_ids`.")
+        if input_values is None and input_ids is None and labels is None:
+            raise ValueError("Need `input_values`, `input_ids`, or `labels`.")
+
+        if input_values is not None:
+            inputs = self.feature_extractor.pad(input_values, *args, **kwargs)
+        elif input_ids is not None:
+            inputs = self.tokenizer.pad(input_ids, **kwargs)
+        else:
+            inputs = None
+
+        if labels is not None:
+            if "input_ids" in labels or (isinstance(labels, list) and labels and "input_ids" in labels[0]):
+                targets = self.tokenizer.pad(labels, **kwargs)
+                padded_labels = targets["input_ids"]
+            else:
+                feature_size_hack = self.feature_extractor.feature_size
+                self.feature_extractor.feature_size = self.feature_extractor.num_mel_bins
+                targets = self.feature_extractor.pad(labels, *args, **kwargs)
+                self.feature_extractor.feature_size = feature_size_hack
+                padded_labels = targets["input_values"]
+        else:
+            targets = None
+            padded_labels = None
+
+        if inputs is None:
+            return targets
+        if targets is not None:
+            inputs["labels"] = padded_labels
+            decoder_attention_mask = targets.get("attention_mask")
+            if decoder_attention_mask is not None:
+                inputs["decoder_attention_mask"] = decoder_attention_mask
+        return inputs
+
+    def batch_decode(self, *args, **kwargs):
+        return self.tokenizer.batch_decode(*args, **kwargs)
+
+    def decode(self, *args, **kwargs):
+        return self.tokenizer.decode(*args, **kwargs)

@@ -36,7 +36,11 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["tokenization_speechmult5"] = ["SpeechMult5Tokenizer"]
+    _import_structure["tokenization_speechmult5"] = [
+        "SpeechMult5Tokenizer",
+        "SpeechMult5CharTokenizer",
+        "SpeechMult5CharProcessor",
+    ]
 
 try:
     if not is_torch_available():
@@ -51,6 +55,9 @@ else:
         "SpeechMult5Model",
         "SpeechMult5PreTrainedModel",
         "SpeechMult5HifiGan",
+    ]
+    _import_structure["modeling_speechmult5_mtl"] = [
+        "SpeechMult5ForMultiTask",
     ]
 
 if TYPE_CHECKING:
@@ -67,7 +74,11 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .tokenization_speechmult5 import SpeechMult5Tokenizer
+        from .tokenization_speechmult5 import (
+            SpeechMult5CharProcessor,
+            SpeechMult5CharTokenizer,
+            SpeechMult5Tokenizer,
+        )
 
     try:
         if not is_torch_available():
@@ -83,6 +94,7 @@ if TYPE_CHECKING:
             SpeechMult5Model,
             SpeechMult5PreTrainedModel,
         )
+        from .modeling_speechmult5_mtl import SpeechMult5ForMultiTask
 
 else:
     import sys

@@ -71,6 +71,9 @@ MAPPING_TEXT_DECODER_PRENET = {
 MAPPING_TEXT_DECODER_POSTNET = {
     "text_decoder_postnet.output_projection": "text_decoder_postnet.lm_head",
 }
+MAPPING_CTC_HEAD = {
+    "encoder.proj": "ctc_head.proj",
+}
 MAPPING_ENCODER = {
     "encoder.layers.*.self_attn.k_proj": "speechmult5.encoder.wrapped_encoder.layers.*.attention.k_proj",
     "encoder.layers.*.self_attn.v_proj": "speechmult5.encoder.wrapped_encoder.layers.*.attention.v_proj",
@@ -106,6 +109,7 @@ MAPPING_S2T = {
     **MAPPING_DECODER,
     **MAPPING_TEXT_DECODER_PRENET,
     **MAPPING_TEXT_DECODER_POSTNET,
+    **MAPPING_CTC_HEAD,
 }
 MAPPING_T2S = {
     **MAPPING_TEXT_ENCODER_PRENET,
@@ -134,7 +138,6 @@ IGNORE_KEYS = [
     "text_decoder_prenet.embed_positions._float_tensor",
 ]
 IGNORE_KEYS_S2T = IGNORE_KEYS + [
-    "encoder.proj",
     "text_encoder_prenet.*",
     "speech_decoder_prenet.*",
     "speech_decoder_postnet.*",
@@ -393,6 +396,15 @@ def convert_speechmult5_checkpoint(
 
     fairseq_checkpoint = torch.load(checkpoint_path)
     recursively_load_weights(fairseq_checkpoint["model"], model, task)
+
+    if task == "s2t":
+        ctc_weight = model.ctc_head.proj.weight.detach()
+        if not torch.isfinite(ctc_weight).all():
+            raise ValueError("Converted CTC head weights contain non-finite values.")
+        logger.info(
+            "Validated converted CTC head weights: shape=%s finite=True",
+            tuple(ctc_weight.shape),
+        )
 
     model.save_pretrained(pytorch_dump_folder_path)
 
